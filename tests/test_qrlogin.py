@@ -31,6 +31,76 @@ class FakeResponse:
         return self._payload
 
 
+class WechatQrLoginTest(unittest.TestCase):
+    """微信扫码登录：二维码链接生成 → 用户粘贴回来的链接里抠 code → 换令牌。"""
+
+    def setUp(self) -> None:
+        net.configure("", False)
+
+    def test_login_url_has_appid_and_redirect(self) -> None:
+        url = qrlogin.build_wechat_login_url()
+        self.assertTrue(url.startswith("https://open.weixin.qq.com/connect/oauth2/authorize?"))
+        self.assertIn("appid=wx2a694105a6abbe6d", url)
+        self.assertIn("redirect_uri=https%3A%2F%2Fapp.vocabgo.com%2Fstudent%2F%3Fauthorize%3D0", url)
+        self.assertIn("scope=snsapi_userinfo", url)
+
+    def test_qr_render_from_login_url(self) -> None:
+        png = qrlogin.render_qr_png(qrlogin.build_wechat_login_url())
+        if png is None:
+            self.skipTest("没装 qrcode 库")
+        self.assertTrue(png.startswith(b"\x89PNG"))
+
+    def test_extract_code_from_pasted_text(self) -> None:
+        cases = {
+            "https://app.vocabgo.com/student/?authorize=0&code=061AbCdEfGhIjKlMnOp&state=vocabgo": "061AbCdEfGhIjKlMnOp",
+            "https://app.vocabgo.com/student/?code=ABC123xyz&authorize=0": "ABC123xyz",
+            "code=XYZ78912": "XYZ78912",
+            "061AbCdEfGhIjKlMnOp": "061AbCdEfGhIjKlMnOp",
+            "https://app.vocabgo.com/student/?authorize=0": "",
+            "": "",
+        }
+        for text, expected in cases.items():
+            self.assertEqual(qrlogin.extract_wechat_code(text), expected, f"解析失败：{text[:40]}")
+
+    def test_exchange_code_for_token(self) -> None:
+        seen: dict = {}
+
+        def fake(method, url, **kwargs):
+            seen["url"] = url
+            seen.update(kwargs.get("json") or {})
+            return FakeResponse(200, {"code": 1, "data": {"token": "wx-token-1"}})
+
+        with patch("vocabgo.net.request", side_effect=fake):
+            result = qrlogin.login_with_wechat_code("061AbCdEfGhIjKlMnOp")
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.token, "wx-token-1")
+        self.assertTrue(seen["url"].endswith("/Auth/Wechat/V2/LoginByWechatCode"))
+        self.assertEqual(seen["code"], "061AbCdEfGhIjKlMnOp")
+        self.assertIn("cpub_k", seen, "必须带上 cpub_k（结构合法即可）")
+        self.assertIn("cpub_v", seen)
+
+    def test_invalid_code_reports_server_message(self) -> None:
+        payload = {"code": 0, "msg": "微信服务异常!"}
+        with patch("vocabgo.net.request", return_value=FakeResponse(200, payload)):
+            result = qrlogin.login_with_wechat_code("badcode123456")
+        self.assertFalse(result.ok)
+        self.assertIn("微信服务异常", result.message)
+
+    def test_encrypted_response_gets_clear_message(self) -> None:
+        payload = {"code": 1, "encrypted": True, "payload": {"iv": "x"}}
+        with patch("vocabgo.net.request", return_value=FakeResponse(200, payload)):
+            result = qrlogin.login_with_wechat_code("code12345678")
+        self.assertFalse(result.ok)
+        self.assertIn("加密", result.message, "要明确告诉用户这条路走不通")
+
+    def test_empty_code_never_hits_network(self) -> None:
+        with patch("vocabgo.net.request") as request:
+            result = qrlogin.login_with_wechat_code("")
+        self.assertFalse(result.ok)
+        request.assert_not_called()
+
+
 class PasswordLoginTest(unittest.TestCase):
     """账号密码登录（POST /Auth/Login）：学生端 /login 页用的就是这条。"""
 

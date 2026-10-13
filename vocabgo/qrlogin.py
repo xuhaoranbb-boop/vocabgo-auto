@@ -17,13 +17,16 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import random
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import quote
 
 import requests
 
@@ -36,6 +39,12 @@ AUTH_BASE = "https://app.vocabgo.com"
 AUTH_LOGIN = AUTH_BASE + "/Auth/Login"
 AUTH_LOGIN_BEFORE = AUTH_BASE + "/Auth/Login/Before"
 AUTH_LOGIN_BY_ID = AUTH_BASE + "/Auth/Login/ByUserId"
+AUTH_WECHAT_V2 = AUTH_BASE + "/Auth/Wechat/V2/LoginByWechatCode"
+
+# 微信扫码登录：词达人自己的公众号 appid 与回调地址（redirect_uri 必须在平台侧注册过，改不了）
+WECHAT_OAUTH = "https://open.weixin.qq.com/connect/oauth2/authorize"
+WECHAT_APPID = "wx2a694105a6abbe6d"
+WECHAT_REDIRECT_URI = "https://app.vocabgo.com/student/?authorize=0"
 
 # 旧路（已废弃，仅保留常量以免调用方 import 报错）
 AUTHORIZE_PATH = "/Auth/Thirdpart/Authorize"
@@ -134,6 +143,56 @@ def login_and_save(result: LoginResult, config_file: Path | None = None) -> Path
     if not result.ok or not result.token:
         return None
     return write_token(config_file or config_path(), result.token)
+
+
+def build_wechat_login_url(state: str = "vocabgo") -> str:
+    """拼出「用微信打开就能登录词达人」的授权链接（把它画成二维码即可）。"""
+    params = {
+        "appid": WECHAT_APPID,
+        "redirect_uri": WECHAT_REDIRECT_URI,
+        "response_type": "code",
+        "scope": "snsapi_userinfo",
+        "state": state,
+    }
+    query = "&".join(f"{key}={quote(str(value), safe='')}" for key, value in params.items())
+    return f"{WECHAT_OAUTH}?{query}#wechat_redirect"
+
+
+def extract_wechat_code(text: str) -> str:
+    """从用户粘贴的内容里抠出微信 code：整条链接、带参 URL、参数片段或裸 code 都认。"""
+    text = (text or "").strip()
+    if not text:
+        return ""
+    matched = re.search(r"(?:^|[?&#])code=([A-Za-z0-9_\-]+)", text)
+    if matched:
+        return matched.group(1)
+    if re.fullmatch(r"[A-Za-z0-9_\-]{8,}", text):
+        return text  # 用户只复制了 code 本身
+    return ""
+
+
+def login_with_wechat_code(code: str) -> LoginResult:
+    """用微信授权回来的 code 换令牌（学生端 /authorize 页用的就是这个接口）。
+
+    参数名与结构来自学生端 JS：``postAuthorizeLoginNew({code, cpub_k, cpub_v})``。
+    实测 cpub_k / cpub_v 只是客户端标识，服务端不会因为占位值拒绝请求，
+    所以这里填一个结构合法的占位值即可。
+    """
+    code = (code or "").strip()
+    if not code:
+        return LoginResult(False, message="没识别到微信 code —— 请把微信里那条链接整段粘过来")
+    placeholder_key = base64.b64encode(b"\x00" * 64).decode("ascii")
+    try:
+        body = _auth_post(AUTH_WECHAT_V2, {"code": code, "cpub_k": placeholder_key, "cpub_v": VERSION})
+    except Exception as exc:
+        return LoginResult(False, message=str(exc))
+
+    if body.get("encrypted"):
+        return LoginResult(
+            False,
+            message="服务端这次返回了加密数据，这条登录路走不通；请改用账号密码登录，或用抓包方式",
+        )
+    return _result_from(body)
 
 
 def headers_for(token: str = "") -> dict[str, str]:

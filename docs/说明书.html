@@ -157,9 +157,23 @@
 python vocabgo_app.py</code></pre>
 
 <h3>4.2 获取用户令牌</h3>
-<p>令牌（usertoken）是程序代表你操作账号的凭据，<b>必须由你本人产生</b>。三种方式，优先用第一种：</p>
+<p>令牌（usertoken）是程序代表你操作账号的凭据，<b>必须由你本人产生</b>。四种方式任选其一 —— 没有密码就用方式 A 扫码：</p>
 
-<h4>方式 A：账号密码登录（推荐）</h4>
+<h4>方式 A：微信扫码登录（不需要密码，最省事）</h4>
+<ol>
+  <li>点「<b>登录获取令牌</b>」，在对话框最下面的「方式三」里会有一张<b>二维码</b></li>
+  <li>用<b>手机微信</b>扫这张码，手机上点「同意」——页面会打开词达人的学生端</li>
+  <li>在打开的页面上点右上角「<b>⋯</b>」→「<b>复制链接</b>」</li>
+  <li>把复制到的链接<b>粘贴</b>到对话框里那条输入框，点「<b>确认登录</b>」</li>
+</ol>
+<div class="note">
+  <b>为什么要复制链接？</b>
+  微信授权成功后，平台只把登录凭证（<code>code</code>）放在那条链接里 —— 程序需要它才能换到令牌。
+  链接形如 <code>https://app.vocabgo.com/student/?authorize=0&amp;code=061xxxx&amp;state=vocabgo</code>，<b>整条粘进去即可</b>，程序会自己挑出 code。
+  <br>链接里的 <code>code</code> 只能用一次、几分钟就过期，复制完请尽快粘贴。
+</div>
+
+<h4>方式 B：账号密码登录</h4>
 <ol>
   <li>点主界面的「<b>登录获取令牌</b>」</li>
   <li>在「方式一」里填你的<b>词达人用户名 / 学号</b>与<b>密码</b>，点「登录」</li>
@@ -170,7 +184,7 @@ python vocabgo_app.py</code></pre>
   先用微信在词达人官网／公众号登录，进去后在个人设置里设置一个密码；也可以直接用下面的方式 C 抓包。
 </div>
 
-<h4>方式 B：用户ID + 图形验证码</h4>
+<h4>方式 C：用户ID + 图形验证码</h4>
 <p>如果你手上只有「用户ID」（不是用户名），用登录对话框里的「方式二」：</p>
 <ol>
   <li>点「换一张」——验证码图片会直接显示在对话框里</li>
@@ -180,7 +194,7 @@ python vocabgo_app.py</code></pre>
 <pre><code>python -m vocabgo captcha                      # 取一张验证码，存成 验证码.png（同时打印 req_no）
 python -m vocabgo login --id 你的ID --password 你的密码 --valid-code 图上的字符 --req-no 上一步的req_no</code></pre>
 
-<h4>方式 C：抓包（最稳，任何登录方式失效时都能用）</h4>
+<h4>方式 D：抓包（任何登录方式都失效时的兜底）</h4>
 <pre><code>pip install mitmproxy
 mitmdump -s tools/mitm_capture.py</code></pre>
 <p>然后让电脑上的微信走 <code>127.0.0.1:8080</code> 代理，打开「词达人」公众号 → 学生端，随便点进一个任务页面。插件会自动把三个字段写进配置文件：</p>

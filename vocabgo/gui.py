@@ -37,12 +37,16 @@ from .paths import bank_path as default_bank_path
 from .paths import config_path
 from .qrlogin import (
     LoginResult,
+    build_wechat_login_url,
+    extract_wechat_code,
     fetch_captcha,
     load_existing_token,
     login_and_save,
     login_with_password,
     login_with_user_id,
+    login_with_wechat_code,
     open_file,
+    render_qr_png,
     token_alive,
 )
 from .settings import apply_recommended, load_settings, recommended_lines, resolve_llm, save_settings
@@ -749,10 +753,36 @@ class VocabgoApp:
         box2.columnconfigure(3, weight=1)
         self._captcha_req_no = ""
 
+        # ── 方式三：微信扫码（不需要密码）──
+        box3 = ttk.LabelFrame(window, text="方式三：微信扫码登录（不需要密码）")
+        box3.pack(fill="x", padx=12, pady=6)
+        wechat_url = build_wechat_login_url()
+        qr_png = render_qr_png(wechat_url)
+        if qr_png:
+            qr_photo = tk.PhotoImage(data=base64.b64encode(qr_png).decode("ascii"))
+            qr_label = ttk.Label(box3, image=qr_photo)
+            qr_label.image = qr_photo  # type: ignore[attr-defined]  # 防 GC
+            qr_label.grid(row=0, column=0, rowspan=3, padx=12, pady=10)
+        else:
+            ttk.Label(box3, text="（二维码组件缺失）", foreground="#b00").grid(row=0, column=0, padx=12, pady=10)
+
+        ttk.Label(
+            box3,
+            text="① 手机微信扫左边的二维码，并在手机上点「同意」\n"
+                 "② 页面打开后，点右上角「⋯」→「复制链接」\n"
+                 "③ 把复制到的链接粘到下面这条框里，点「确认登录」",
+            justify="left",
+        ).grid(row=0, column=1, sticky="w", padx=8, pady=(10, 4))
+        self.var_wechat_url = tk.StringVar()
+        entry_wechat = ttk.Entry(box3, textvariable=self.var_wechat_url, width=46)
+        entry_wechat.grid(row=1, column=1, sticky="we", padx=8, pady=4)
+        entry_wechat.bind("<Return>", lambda _e: self._do_wechat_login())
+        ttk.Button(box3, text="确认登录", command=self._do_wechat_login).grid(row=2, column=1, sticky="e", padx=8, pady=(0, 10))
+        box3.columnconfigure(1, weight=1)
+
         ttk.Label(
             window,
-            text="没有密码？先用微信在官网/公众号登录，进去后在个人设置里设置密码。\n"
-                 "也可以自己抓包（tools/mitm_capture.py），把 usertoken 直接粘到主界面。",
+            text="三种方式任选一种即可。没有密码就扫码，登录失败就抓包（tools/mitm_capture.py）。",
             foreground="#52606d",
             justify="left",
         ).pack(anchor="w", padx=14, pady=(6, 10))
@@ -805,6 +835,19 @@ class VocabgoApp:
 
         def task() -> None:
             self._handle_login(login_with_password(user, password))
+
+        self._run_in_thread(task, busy=False)
+
+    def _do_wechat_login(self) -> None:
+        raw = self.var_wechat_url.get().strip()
+        code = extract_wechat_code(raw)
+        if not code:
+            messagebox.showwarning(APP_TITLE, "没识别到链接里的 code。请把微信里复制到的那整条链接粘进来。")
+            return
+        self.log("🔑 正在用微信授权码换令牌…")
+
+        def task() -> None:
+            self._handle_login(login_with_wechat_code(code))
 
         self._run_in_thread(task, busy=False)
 
