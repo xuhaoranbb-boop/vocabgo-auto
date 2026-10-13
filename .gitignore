@@ -21,3 +21,7 @@ selftest.txt
 # 编辑器
 .idea/
 .vscode/
+
+# 登录/验证码临时文件
+验证码.png
+_*.png

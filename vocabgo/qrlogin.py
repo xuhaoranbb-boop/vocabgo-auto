@@ -1,16 +1,18 @@
 # -*- coding: utf-8 -*-
-"""扫码授权取 UserToken（不用抓包，纯接口流程；GUI 与命令行共用）。
+"""获取用户令牌（多种方式，都不需要抓包）。
 
-链路（原始实现来自 cdr，但域名/路径已按现状修正）：
+⚠️ 历史坑：最初这里实现的是「扫码授权」，走 `/Auth/Thirdpart/Authorize` 换出微信 OAuth 链接，
+让用户扫码绑定一个本地随机 user_token。**这条路已经不通了** —— 实测扫码后服务端返回
+「微信认证失败」：那套接口是给第三方授权用的，且新版客户端登录已改成 handshake + 公钥加密传输。
 
-1. 本地生成 32 位随机 user_token（词达人把「身份」绑到这个字符串上）
-2. 调 {host}/Auth/Thirdpart/Authorize 换出 redirect_url（微信 OAuth 链接）
-3. 把 redirect_url 变成二维码 → 微信扫码 → 词达人授权给这个 user_token
-4. 用业务接口（带着这个 token）确认授权是否生效
-5. 写进 config.json
+现在可用的方式（均从学生端 JS 里还原出来的真实接口）：
 
-注意：这个接口以前在 gateway.vocabgo.com，现在在 app.vocabgo.com（老域名返回 404），
-所以这里两个域名都试一遍并记住哪个能用，将来再搬家也不至于直接挂掉。
+1. **账号密码登录**：``POST /Auth/Login`` ``{user_name, password, login_type}`` → ``data.token``
+2. **用户ID + 图形验证码**：``POST /Auth/Login/Before`` 取验证码 → ``POST /Auth/Login/ByUserId``
+   ``{id, password, req_no, valid_code}`` → ``data.token``
+3. 抓包（``tools/mitm_capture.py``）：已经登录上微信的客户端里直接抄 ``usertoken``
+
+拿到 token 后统一写进 config.json 的 ``auth.usertoken``。
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ import json
 import os
 import random
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
@@ -29,11 +32,14 @@ from .client import DEFAULT_UA, derive_auth_headers
 from .crypto import SALT, VERSION, md5
 from .paths import config_path
 
+AUTH_BASE = "https://app.vocabgo.com"
+AUTH_LOGIN = AUTH_BASE + "/Auth/Login"
+AUTH_LOGIN_BEFORE = AUTH_BASE + "/Auth/Login/Before"
+AUTH_LOGIN_BY_ID = AUTH_BASE + "/Auth/Login/ByUserId"
+
+# 旧路（已废弃，仅保留常量以免调用方 import 报错）
 AUTHORIZE_PATH = "/Auth/Thirdpart/Authorize"
-AUTHORIZE_HOSTS = (
-    "https://app.vocabgo.com",       # 现状（2026-10 实测可用）
-    "https://gateway.vocabgo.com",   # 老域名，留作兜底
-)
+AUTHORIZE_HOSTS = (AUTH_BASE, "https://gateway.vocabgo.com")
 RETURN_URL = "https://app.vocabgo.com/overall/#/student/home"
 
 # 令牌是否生效：打真实业务接口，code==1 才算有效
@@ -46,11 +52,88 @@ VALIDATE_ENDPOINTS: tuple[tuple[str, str, dict[str, Any]], ...] = (
     ("GET", "https://app.vocabgo.com/Student/Main", {}),
 )
 
-_working_host: str | None = None  # 记住哪个域名能用，下次直接用
+_working_host: str | None = None  # 兼容旧引用
 
 
 def now_ms() -> int:
     return int(time.time() * 1000)
+
+
+@dataclass
+class LoginResult:
+    ok: bool
+    token: str = ""
+    message: str = ""
+
+
+def _auth_post(path: str, payload: dict[str, Any], timeout: float = 20.0) -> dict[str, Any]:
+    """给 Auth 系列接口发一次带签名的请求（和业务请求同一套签名规则）。"""
+    stamp = now_ms()
+    data: dict[str, Any] = {**payload, "timestamp": stamp, "version": VERSION}
+    data["sign"] = md5("&".join(f"{k}={data[k]}" for k in sorted(data) if data[k] or data[k] == 0) + SALT)
+    data["app_type"] = 1
+    resp = net.request("POST", path, json=data, headers=headers_for(), timeout=timeout)
+    try:
+        return resp.json()
+    except ValueError as exc:
+        raise RuntimeError(
+            net.friendly_error(exc, path) + f"\n   HTTP {resp.status_code}，返回内容：{resp.text[:160]}"
+        ) from exc
+
+
+def _result_from(body: dict[str, Any]) -> LoginResult:
+    if body.get("code") == 1:
+        token = str((body.get("data") or {}).get("token") or "")
+        if token:
+            return LoginResult(True, token=token)
+        return LoginResult(False, message="登录成功但没拿到令牌，请改用抓包方式")
+    return LoginResult(False, message=str(body.get("msg") or body.get("message") or "登录失败"))
+
+
+def login_with_password(user_name: str, password: str, login_type: int = 1) -> LoginResult:
+    """账号密码登录（学生端 /login 页用的就是这个接口）。
+
+    参数名来自学生端 JS：``postUserLogin({user_name, password, login_type})``。
+    """
+    user_name = (user_name or "").strip()
+    if not user_name or not password:
+        return LoginResult(False, message="用户名和密码都要填")
+    try:
+        body = _auth_post(AUTH_LOGIN, {"user_name": user_name, "password": password, "login_type": login_type})
+    except Exception as exc:
+        return LoginResult(False, message=str(exc))
+    return _result_from(body)
+
+
+def fetch_captcha() -> tuple[str, str]:
+    """取图形验证码：返回 ``(req_no, 验证码图片 data-URI)``。"""
+    body = _auth_post(AUTH_LOGIN_BEFORE, {})
+    data = body.get("data") or {}
+    return str(data.get("req_no") or ""), str(data.get("valid_code_image") or "")
+
+
+def login_with_user_id(user_id: str, password: str, valid_code: str, req_no: str) -> LoginResult:
+    """用户ID + 密码 + 图形验证码登录（学生端 /testLogin 页）。
+
+    参数名来自学生端 JS：``postTestLogin({id, password, req_no, valid_code})``。
+    """
+    if not str(user_id).strip() or not password or not str(valid_code).strip():
+        return LoginResult(False, message="用户ID、密码、验证码都要填")
+    try:
+        body = _auth_post(
+            AUTH_LOGIN_BY_ID,
+            {"id": str(user_id).strip(), "password": password, "req_no": req_no, "valid_code": str(valid_code).strip()},
+        )
+    except Exception as exc:
+        return LoginResult(False, message=str(exc))
+    return _result_from(body)
+
+
+def login_and_save(result: LoginResult, config_file: Path | None = None) -> Path | None:
+    """登录成功就把令牌写进配置文件。"""
+    if not result.ok or not result.token:
+        return None
+    return write_token(config_file or config_path(), result.token)
 
 
 def headers_for(token: str = "") -> dict[str, str]:
@@ -97,7 +180,12 @@ def new_token(seed: str = "") -> str:
 
 
 def authorize(token: str) -> str:
-    """换取授权链接（微信里打开即完成绑定）。会按顺序试所有已知域名。"""
+    """【已失效，勿用】旧的扫码授权链路。
+
+    实测（2026-10）走这条路扫码后服务端返回「微信认证失败」：``/Thirdpart/Authorize``
+    是第三方授权用途，新版客户端登录已改为 handshake + 公钥加密传输。
+    保留代码仅为兼容历史调用；请改用 ``login_with_password`` / ``login_with_user_id``。
+    """
     global _working_host
 
     timestamp = now_ms()

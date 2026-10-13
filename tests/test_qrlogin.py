@@ -31,6 +31,101 @@ class FakeResponse:
         return self._payload
 
 
+class PasswordLoginTest(unittest.TestCase):
+    """账号密码登录（POST /Auth/Login）：学生端 /login 页用的就是这条。"""
+
+    def setUp(self) -> None:
+        net.configure("", False)
+
+    def test_success_returns_token(self) -> None:
+        with patch("vocabgo.net.request", return_value=FakeResponse(200, {"code": 1, "data": {"token": "tok-123"}})):
+            result = qrlogin.login_with_password("20230001", "pw")
+        self.assertTrue(result.ok)
+        self.assertEqual(result.token, "tok-123")
+        self.assertEqual(result.message, "")
+
+    def test_wrong_credentials_reports_server_message(self) -> None:
+        with patch("vocabgo.net.request", return_value=FakeResponse(200, {"code": 0, "msg": "用户名错误"})):
+            result = qrlogin.login_with_password("nobody", "pw")
+        self.assertFalse(result.ok)
+        self.assertEqual(result.message, "用户名错误")
+        self.assertEqual(result.token, "")
+
+    def test_empty_input_never_hits_network(self) -> None:
+        with patch("vocabgo.net.request") as request:
+            result = qrlogin.login_with_password("", "")
+        self.assertFalse(result.ok)
+        request.assert_not_called()
+
+    def test_request_shape(self) -> None:
+        """参数名必须和学生端 JS 里一致：user_name / password / login_type，且带签名。"""
+        seen: dict = {}
+
+        def fake(method, url, **kwargs):
+            self.assertEqual(method, "POST")
+            self.assertTrue(url.endswith("/Auth/Login"))
+            seen.update(kwargs.get("json") or {})
+            return FakeResponse(200, {"code": 1, "data": {"token": "t"}})
+
+        with patch("vocabgo.net.request", side_effect=fake):
+            qrlogin.login_with_password("myuser", "mypass")
+
+        self.assertEqual(seen["user_name"], "myuser")
+        self.assertEqual(seen["password"], "mypass")
+        self.assertEqual(seen["login_type"], 1)
+        self.assertEqual(seen["app_type"], 1)
+        self.assertIn("sign", seen, "必须带签名")
+        self.assertIn("timestamp", seen)
+
+
+class UserIdLoginTest(unittest.TestCase):
+    """用户ID + 图形验证码登录（POST /Auth/Login/ByUserId）：学生端 /testLogin 页。"""
+
+    def setUp(self) -> None:
+        net.configure("", False)
+
+    def test_fetch_captcha(self) -> None:
+        payload = {"code": 1, "data": {"req_no": "REQ-1", "valid_code_image": "data:image/png;base64,iVBORw0KGgo="}}
+        with patch("vocabgo.net.request", return_value=FakeResponse(200, payload)):
+            req_no, image = qrlogin.fetch_captcha()
+        self.assertEqual(req_no, "REQ-1")
+        self.assertTrue(image.startswith("data:image/png"))
+
+    def test_request_shape(self) -> None:
+        seen: dict = {}
+
+        def fake(method, url, **kwargs):
+            seen.update({**kwargs.get("json", {}), "_url": url})
+            return FakeResponse(200, {"code": 1, "data": {"token": "tok-id"}})
+
+        with patch("vocabgo.net.request", side_effect=fake):
+            result = qrlogin.login_with_user_id("9527", "pw", "8a3f", "REQ-9")
+
+        self.assertTrue(result.ok)
+        self.assertTrue(seen["_url"].endswith("/Auth/Login/ByUserId"))
+        self.assertEqual(seen["id"], "9527")
+        self.assertEqual(seen["password"], "pw")
+        self.assertEqual(seen["valid_code"], "8a3f")
+        self.assertEqual(seen["req_no"], "REQ-9")
+
+    def test_missing_fields_rejected(self) -> None:
+        with patch("vocabgo.net.request") as request:
+            result = qrlogin.login_with_user_id("9527", "pw", "", "REQ-9")
+        self.assertFalse(result.ok)
+        request.assert_not_called()
+
+
+class LoginAndSaveTest(unittest.TestCase):
+    def test_only_writes_on_success(self) -> None:
+        with patch.object(qrlogin, "write_token") as writer:
+            self.assertIsNone(qrlogin.login_and_save(qrlogin.LoginResult(False, message="失败")))
+            writer.assert_not_called()
+
+            qrlogin.login_and_save(qrlogin.LoginResult(True, token="tok-9"))
+            writer.assert_called_once()
+            self.assertEqual(writer.call_args[0][1], "tok-9")
+
+
 class AuthorizeFallbackTest(unittest.TestCase):
     def setUp(self) -> None:
         net.configure("", False)

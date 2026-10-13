@@ -92,6 +92,54 @@ def build_solver(config: dict[str, Any], client: VocabgoClient, kind: str, args:
 
 
 # ── 子命令 ──
+def cmd_login(args: argparse.Namespace) -> int:
+    """用词达人账号密码登录，自动把令牌写进配置（等价于界面上的「登录获取令牌」）。"""
+    from .qrlogin import login_and_save, login_with_password, login_with_user_id
+
+    config = load_config(args.config)
+    if args.id and args.password:
+        if not args.valid_code:
+            print("❌ 用「用户ID 登录」需要图形验证码：先用 --captcha 取一张，再用 --valid-code 提交")
+            return 1
+        result = login_with_user_id(args.id, args.password, args.valid_code, args.req_no)
+    elif args.user and args.password:
+        result = login_with_password(args.user, args.password)
+    else:
+        import getpass
+
+        user = input("词达人用户名 / 学号：").strip()
+        password = getpass.getpass("密码（不会显示）：")
+        result = login_with_password(user, password)
+
+    if result.ok:
+        path = login_and_save(result, (config.get("_path") if args.config else None))
+        print(f"✅ 登录成功，令牌已写入 {path}")
+        print(f"   令牌：{result.token[:10]}…（可用 python -m vocabgo check 复验）")
+        return 0
+    print(f"❌ 登录失败：{result.message}")
+    if "用户名" in result.message or "密码" in result.message:
+        print("   提示：用户名/密码错误。忘记密码可以先用微信在官网登录后重新设置；")
+        print("         实在不行就用抓包方式（tools/mitm_capture.py）拿令牌。")
+    return 1
+
+
+def cmd_login_captcha(args: argparse.Namespace) -> int:
+    """取一张图形验证码（给 --kind login 的第二种方式用），同时保存成图片。"""
+    from .qrlogin import fetch_captcha
+
+    load_config(args.config)
+    req_no, image = fetch_captcha()
+    if not image:
+        print("❌ 服务端没返回验证码图片")
+        return 1
+    target = Path(args.out or "验证码.png")
+    target.write_bytes(base64.b64decode(image.split(",", 1)[-1]))
+    print(f"✅ 验证码已保存：{target}")
+    print(f"   req_no = {req_no}")
+    print(f"   下一步：python -m vocabgo login --id <用户ID> --password <密码> --valid-code <图上的字符> --req-no {req_no}")
+    return 0
+
+
 def cmd_check(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     client = build_client(config, debug=args.debug)
@@ -388,6 +436,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_check = sub.add_parser("check", help="检查 token 是否可用")
     p_check.set_defaults(func=cmd_check)
+
+    p_login = sub.add_parser("login", help="用账号密码登录，自动获取并保存令牌")
+    p_login.add_argument("--user", default="", help="用户名 / 学号")
+    p_login.add_argument("--id", default="", help="用户ID（第二种登录方式）")
+    p_login.add_argument("--password", default="", help="密码（不填则交互式询问）")
+    p_login.add_argument("--valid-code", default="", help="图形验证码字符（配合 --id）")
+    p_login.add_argument("--req-no", default="", help="验证码会话号（配合 --id）")
+    p_login.set_defaults(func=cmd_login)
+
+    p_captcha = sub.add_parser("captcha", help="取一张图形验证码（给 login --id 用）")
+    p_captcha.add_argument("--out", default="", help="保存路径，默认 验证码.png")
+    p_captcha.set_defaults(func=cmd_login_captcha)
 
     p_tasks = sub.add_parser("tasks", help="列出任务")
     p_tasks.add_argument("--kind", choices=["class", "study"], default="class")

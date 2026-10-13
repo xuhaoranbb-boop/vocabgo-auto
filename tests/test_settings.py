@@ -394,29 +394,36 @@ class GuiPlaceholderTest(unittest.TestCase):
         self.assertNotIn("留空即自动推算", json.dumps(config, ensure_ascii=False), "提示文字泄漏进配置了")
 
 
-    def test_qr_popup_shows_image_in_window(self) -> None:
-        """点「扫码授权」时二维码要直接弹在界面上，而不是丢个文件让用户去找。"""
-        import vocabgo.qrlogin as qrlogin  # noqa: PLC0415
-
-        data = qrlogin.render_qr_png("https://open.weixin.qq.com/connect/oauth2/authorize?appid=x")
-        if data is None:
-            self.skipTest("本机没装 qrcode 库")
-
-        self.app._show_qr("https://open.weixin.qq.com/x", data)  # noqa: SLF001
+    def test_login_dialog_opens_and_closes(self) -> None:
+        """点「登录获取令牌」应弹出登录对话框（账号密码 / 用户ID+验证码）。"""
+        self.app.on_login()
         self.root.update()
-        self.assertIsNotNone(self.app.qr_window, "应该弹出二维码窗口")
-        self.assertTrue(self.app.qr_window.winfo_exists())
-        self.app._close_qr_window()
+        self.assertIsNotNone(self.app.login_window, "应该弹出登录窗口")
+        self.assertTrue(self.app.login_window.winfo_exists())
+        self.app._close_login_window()  # noqa: SLF001
         self.root.update()
-        self.assertIsNone(self.app.qr_window)
+        self.assertIsNone(self.app.login_window)
 
-    def test_qr_popup_degrades_without_qrcode(self) -> None:
-        """没有二维码库时：不崩、把链接复制到剪贴板、日志给出提示。"""
-        with patch("vocabgo.gui.messagebox.showinfo") as shown:
-            self.app._show_qr("https://open.weixin.qq.com/fallback", None)  # noqa: SLF001
+    def test_captcha_image_renders_in_dialog(self) -> None:
+        """服务端给的验证码 data-URI 要能直接画在对话框上。"""
+        import base64  # noqa: PLC0415
+        import tempfile  # noqa: PLC0415
+
+        from vocabgo.vision import render_probe_image  # noqa: PLC0415
+
+        self.app.on_login()
         self.root.update()
-        self.assertIsNone(self.app.qr_window)
-        self.assertTrue(shown.called, "应弹提示告诉用户用链接")
+        with tempfile.TemporaryDirectory() as folder:
+            png = render_probe_image("8a3f", Path(folder) / "captcha.png")
+            if png is None:
+                self.skipTest("没有 Pillow，无法造验证码图")
+            data_uri = "data:image/png;base64," + base64.b64encode(png.read_bytes()).decode("ascii")
+
+        self.app._show_captcha("REQ-TEST", data_uri)  # noqa: SLF001
+        self.root.update()
+        self.assertEqual(self.app._captcha_req_no, "REQ-TEST")  # noqa: SLF001
+        self.assertIsNotNone(getattr(self.app.lbl_captcha, "image", None), "验证码图片应挂到控件上")
+        self.app._close_login_window()  # noqa: SLF001
 
 
 class GuiImportTest(unittest.TestCase):

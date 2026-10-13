@@ -35,7 +35,16 @@ from .llm import (
 from .paths import app_dir
 from .paths import bank_path as default_bank_path
 from .paths import config_path
-from .qrlogin import load_existing_token, open_file, start_login, token_alive
+from .qrlogin import (
+    LoginResult,
+    fetch_captcha,
+    load_existing_token,
+    login_and_save,
+    login_with_password,
+    login_with_user_id,
+    open_file,
+    token_alive,
+)
 from .settings import apply_recommended, load_settings, recommended_lines, resolve_llm, save_settings
 from .solver import Solver, select_words
 from .vision import (
@@ -57,13 +66,13 @@ class VocabgoApp:
         self.log_queue: queue.Queue[str] = queue.Queue()
         self.cancel = threading.Event()
         self.worker: threading.Thread | None = None
-        self.qr_cancel = threading.Event()
         self.tasks: list[dict[str, Any]] = []
         self._last_provider = ""
         self._models_loaded = False
         self._autosave_ready = False  # 首屏填控件期间别触发自动保存
         self._log_job: str | None = None
-        self.qr_window: tk.Toplevel | None = None
+        self.login_window: tk.Toplevel | None = None
+        self._captcha_req_no = ""
 
         root.title(APP_TITLE)
         self._build_ui()
@@ -141,7 +150,7 @@ class VocabgoApp:
 
         buttons = ttk.Frame(box)
         buttons.grid(row=3, column=1, sticky="w", padx=6, pady=(2, 2))
-        ttk.Button(buttons, text="扫码授权（推荐）", command=self.on_qr_login).pack(side="left")
+        ttk.Button(buttons, text="登录获取令牌", command=self.on_login).pack(side="left")
         ttk.Button(buttons, text="测试连接", command=self.on_check_token).pack(side="left", padx=6)
         ttk.Button(buttons, text="说明", command=self.on_account_help).pack(side="left")
 
@@ -390,7 +399,6 @@ class VocabgoApp:
             except Exception:
                 pass
             self._log_job = None
-        self.qr_cancel.set()
         self.cancel.set()
         self.root.destroy()
 
@@ -516,15 +524,17 @@ class VocabgoApp:
     def on_account_help(self) -> None:
         messagebox.showinfo(
             APP_TITLE,
-            "三个字段分别是什么？\n\n"
-            "· 用户令牌：代表你账号的凭据，点「扫码授权」用微信扫一下就自动填好。\n\n"
-            "· abc：平台的一道反爬校验，值 = md5(你的客户端 UA)。\n"
-            "· authorization-v：同类的版本标记，值是固定的 md5(\"0\")。\n"
-            "  这两个留空即可 —— 程序会自己推算；如果你抓过包，填真值也行（优先用真值）。\n\n"
-            "怎么自己拿真值：\n"
-            "  用抓包工具（mitmdump -s tools/mitm_capture.py）抓一次词达人学生端的请求，\n"
-            "  插件会把 usertoken / abc / authorization-v 自动写进配置文件。\n\n"
-            "注意：刷题期间不要在手机或其它设备登录词达人，否则用户令牌会被刷新失效。",
+            "怎么拿到用户令牌？\n\n"
+            "方式一（推荐）：点「登录获取令牌」，用你的词达人账号／密码登录，\n"
+            "  程序会自动把令牌写好。\n\n"
+            "方式二：如果你只有「用户ID」，用第二种登录方式（需要填图形验证码）。\n\n"
+            "方式三：自己抓包。跑 mitmdump -s tools/mitm_capture.py，让微信走代理，\n"
+            "  打开词达人学生端，插件会把 usertoken / abc / authorization-v 自动写进配置。\n\n"
+            "关于下面两个字段：\n"
+            "· abc：平台反爬校验，值 = md5(你的客户端 UA)\n"
+            "· authorization-v：同类版本标记，值固定为 md5(\"0\")\n"
+            "  这两个留空即可 —— 程序会自己推算；抓包拿到真值则优先用真值。\n\n"
+            "注意：刷题期间不要在手机或其它设备登录词达人，否则令牌会被刷新失效。",
         )
 
     def on_apply_recommended(self) -> None:
@@ -688,78 +698,148 @@ class VocabgoApp:
 
         self._run_in_thread(task, busy=False)
 
-    def on_qr_login(self) -> None:
-        def task() -> None:
-            self.qr_cancel.clear()
-            self.log("🔄 正在申请授权链接…")
-            ok, token = start_login(
-                on_url=lambda url, data: self.ui(self._show_qr, url, data),
-                on_status=self.log,
-                should_stop=self.qr_cancel.is_set,
-                timeout=300,
-            )
-            if ok:
-                self.ui(self._close_qr_window)
-                self.ui(self.var_token.set, token)
-                self.ui(self.log, f"✅ 已获取用户令牌：{token[:10]}…")
-                self.ui(self._refresh_status)
-            else:
-                self.log("⏹️ 授权未完成（超时或已取消）")
-
-        self._run_in_thread(task, busy=False)
-
-    def _close_qr_window(self) -> None:
-        if self.qr_window is not None and self.qr_window.winfo_exists():
-            self.qr_window.destroy()
-        self.qr_window = None
-
-    def _copy_link(self, url: str) -> None:
-        try:
-            self.root.clipboard_clear()
-            self.root.clipboard_append(url)
-            self.log("📋 授权链接已复制到剪贴板，粘到微信里点开即可")
-        except Exception as exc:
-            self.log(f"⚠️ 复制失败：{exc}")
-
-    def _show_qr(self, url: str, data: bytes | None) -> None:
-        """二维码直接弹在界面上 —— 不用用户自己去文件夹里找图片。"""
-        self._close_qr_window()
-
-        if not data:
-            self.log("⚠️ 没能生成二维码（缺少二维码组件），请把下面的链接发到微信里点开：")
-            self.log(url)
-            self._copy_link(url)
-            messagebox.showinfo(APP_TITLE, "没能生成二维码图片，链接已复制到剪贴板：\n\n" + url[:120] + "…")
+    def on_login(self) -> None:
+        """打开「获取用户令牌」对话框：账号密码登录 / 用户ID+图形验证码。"""
+        if self.login_window is not None and self.login_window.winfo_exists():
+            self.login_window.lift()
             return
 
         window = tk.Toplevel(self.root)
-        self.qr_window = window
-        window.title("微信扫码授权")
+        self.login_window = window
+        window.title("获取用户令牌")
         window.resizable(False, False)
         try:
             window.transient(self.root)
         except Exception:
             pass
 
-        image = tk.PhotoImage(data=base64.b64encode(data).decode("ascii"))
-        picture = ttk.Label(window, image=image)
-        picture.image = image  # type: ignore[attr-defined]  # 不挂住引用会被 GC 掉，图就没了
-        picture.pack(padx=18, pady=(18, 4))
-        ttk.Label(window, text="① 打开手机微信 → 扫一扫\n② 手机上点「同意」", justify="center").pack(pady=(0, 10))
+        # ── 方式一：账号密码 ──
+        box1 = ttk.LabelFrame(window, text="方式一：账号密码登录（推荐）")
+        box1.pack(fill="x", padx=12, pady=(12, 6))
+        self.var_login_user = tk.StringVar()
+        self.var_login_pass = tk.StringVar()
+        ttk.Label(box1, text="用户名 / 学号").grid(row=0, column=0, sticky="w", padx=10, pady=4)
+        ttk.Entry(box1, textvariable=self.var_login_user, width=26).grid(row=0, column=1, sticky="we", padx=10, pady=4)
+        ttk.Label(box1, text="密码").grid(row=1, column=0, sticky="w", padx=10, pady=4)
+        entry_pwd = ttk.Entry(box1, textvariable=self.var_login_pass, show="•", width=26)
+        entry_pwd.grid(row=1, column=1, sticky="we", padx=10, pady=4)
+        entry_pwd.bind("<Return>", lambda _e: self._do_password_login())
+        ttk.Button(box1, text="登录", command=self._do_password_login).grid(row=2, column=1, sticky="e", padx=10, pady=(2, 8))
+        box1.columnconfigure(1, weight=1)
 
-        link_box = tk.Text(window, height=3, width=46, wrap="char")
-        link_box.insert("1.0", url)
-        link_box.configure(state="disabled")
-        link_box.pack(padx=18, pady=(0, 8))
-        ttk.Button(window, text="复制链接（扫不了就用这个）", command=lambda: self._copy_link(url)).pack(pady=(0, 16))
+        # ── 方式二：用户ID + 图形验证码 ──
+        box2 = ttk.LabelFrame(window, text="方式二：用户ID + 图形验证码")
+        box2.pack(fill="x", padx=12, pady=6)
+        self.var_login_id = tk.StringVar()
+        self.var_login_pass2 = tk.StringVar()
+        self.var_login_code = tk.StringVar()
+        ttk.Label(box2, text="用户ID").grid(row=0, column=0, sticky="w", padx=10, pady=4)
+        ttk.Entry(box2, textvariable=self.var_login_id, width=12).grid(row=0, column=1, sticky="w", padx=10, pady=4)
+        ttk.Label(box2, text="密码").grid(row=0, column=2, sticky="e", padx=6, pady=4)
+        ttk.Entry(box2, textvariable=self.var_login_pass2, show="•", width=16).grid(row=0, column=3, sticky="we", padx=10, pady=4)
+        ttk.Label(box2, text="验证码").grid(row=1, column=0, sticky="w", padx=10, pady=4)
+        entry_code = ttk.Entry(box2, textvariable=self.var_login_code, width=12)
+        entry_code.grid(row=1, column=1, sticky="w", padx=10, pady=4)
+        entry_code.bind("<Return>", lambda _e: self._do_id_login())
+        self.lbl_captcha = ttk.Label(box2, text="点「换一张」取验证码", cursor="hand2")
+        self.lbl_captcha.grid(row=1, column=2, sticky="e", padx=4, pady=4)
+        self.lbl_captcha.bind("<Button-1>", lambda _e: self._refresh_captcha())
+        ttk.Button(box2, text="换一张", command=self._refresh_captcha).grid(row=1, column=4, padx=8, pady=4)
+        ttk.Button(box2, text="登录", command=self._do_id_login).grid(row=2, column=4, sticky="e", padx=8, pady=(2, 8))
+        box2.columnconfigure(3, weight=1)
+        self._captcha_req_no = ""
+
+        ttk.Label(
+            window,
+            text="没有密码？先用微信在官网/公众号登录，进去后在个人设置里设置密码。\n"
+                 "也可以自己抓包（tools/mitm_capture.py），把 usertoken 直接粘到主界面。",
+            foreground="#52606d",
+            justify="left",
+        ).pack(anchor="w", padx=14, pady=(6, 10))
+        ttk.Button(window, text="关闭", command=self._close_login_window).pack(anchor="e", padx=14, pady=(0, 12))
 
         window.update_idletasks()
         x = self.root.winfo_rootx() + max(0, (self.root.winfo_width() - window.winfo_width()) // 2)
-        y = self.root.winfo_rooty() + 40
+        y = self.root.winfo_rooty() + 60
         window.geometry(f"+{max(x, 0)}+{max(y, 0)}")
         window.lift()
         window.focus_force()
-        self.log("📷 二维码已弹出，请用手机微信扫一扫")
+
+    def _close_login_window(self) -> None:
+        if self.login_window is not None and self.login_window.winfo_exists():
+            self.login_window.destroy()
+        self.login_window = None
+
+    def _refresh_captcha(self) -> None:
+        def task() -> None:
+            try:
+                req_no, image = fetch_captcha()
+            except Exception as exc:
+                self.log(f"❌ 取验证码失败：{exc}")
+                return
+            if not image:
+                self.log("⚠️ 服务端没返回验证码图片")
+                return
+            self.ui(self._show_captcha, req_no, image)
+
+        self._run_in_thread(task, busy=False)
+
+    def _show_captcha(self, req_no: str, image_uri: str) -> None:
+        self._captcha_req_no = req_no
+        try:
+            photo = tk.PhotoImage(data=image_uri.split(",", 1)[-1])
+        except Exception as exc:
+            self.log(f"⚠️ 验证码图片显示失败：{exc}")
+            return
+        self.lbl_captcha.configure(image=photo, text="")
+        self.lbl_captcha.image = photo  # type: ignore[attr-defined]  # 防 GC
+        self.log("🔢 验证码已显示，照着图填进「验证码」框")
+
+    def _do_password_login(self) -> None:
+        user = self.var_login_user.get().strip()
+        password = self.var_login_pass.get()
+        if not user or not password:
+            messagebox.showwarning(APP_TITLE, "用户名和密码都要填")
+            return
+        self.log(f"🔑 正在用账号密码登录（{user}）…")
+
+        def task() -> None:
+            self._handle_login(login_with_password(user, password))
+
+        self._run_in_thread(task, busy=False)
+
+    def _do_id_login(self) -> None:
+        user_id = self.var_login_id.get().strip()
+        password = self.var_login_pass2.get()
+        code = self.var_login_code.get().strip()
+        if not user_id or not password or not code:
+            messagebox.showwarning(APP_TITLE, "用户ID、密码、验证码都要填")
+            return
+        if not self._captcha_req_no:
+            messagebox.showwarning(APP_TITLE, "请先点「换一张」获取验证码图片")
+            return
+        self.log(f"🔑 正在用用户ID 登录（ID={user_id}）…")
+
+        def task() -> None:
+            self._handle_login(login_with_user_id(user_id, password, code, self._captcha_req_no))
+
+        self._run_in_thread(task, busy=False)
+
+    def _handle_login(self, result: LoginResult) -> None:
+        if not result.ok:
+            self.log(f"❌ 登录失败：{result.message}")
+            self.ui(self._on_login_failed, result.message)
+            return
+        path = login_and_save(result)
+        self.ui(self.var_token.set, result.token)
+        self.log(f"✅ 登录成功，令牌已写入 {path}")
+        self.log(f"   令牌：{result.token[:10]}…（点「测试连接」可复验）")
+        self.ui(self._refresh_status)
+        self.ui(self._close_login_window)
+
+    def _on_login_failed(self, message: str) -> None:
+        messagebox.showerror(APP_TITLE, f"登录失败：{message}")
+        self._refresh_captcha()  # 验证码是一次性的，失败后换一张
 
     # ── 任务操作 ──
     def on_kind_change(self) -> None:
