@@ -87,18 +87,105 @@ class WechatQrLoginTest(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertIn("微信服务异常", result.message)
 
-    def test_encrypted_response_gets_clear_message(self) -> None:
-        payload = {"code": 1, "encrypted": True, "payload": {"iv": "x"}}
-        with patch("vocabgo.net.request", return_value=FakeResponse(200, payload)):
-            result = qrlogin.login_with_wechat_code("code12345678")
-        self.assertFalse(result.ok)
-        self.assertIn("加密", result.message, "要明确告诉用户这条路走不通")
-
     def test_empty_code_never_hits_network(self) -> None:
         with patch("vocabgo.net.request") as request:
             result = qrlogin.login_with_wechat_code("")
         self.assertFalse(result.ok)
         request.assert_not_called()
+
+
+class WechatEncryptedResponseTest(unittest.TestCase):
+    """服务端会用我们的公钥加密响应 —— 这里造一个真加密响应，验证我们能解开。
+
+    加密方案（取自学生端源码）：
+    ECDH P-256 → HKDF-SHA256(salt, info="vcg-auth-aes") → AES-GCM(iv, cipher_text, aad)
+    """
+
+    @staticmethod
+    def _make_encrypted_envelope(client_public_b64: str, plain: dict, aad: str) -> dict:
+        import base64 as b64
+        import json as _json
+        import os
+
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+        client_public = serialization.load_der_public_key(b64.b64decode(client_public_b64))
+        server_private = ec.generate_private_key(ec.SECP256R1())
+        shared = server_private.exchange(ec.ECDH(), client_public)
+        salt = os.urandom(16)
+        key = HKDF(algorithm=hashes.SHA256(), length=32, salt=salt, info=b"vcg-auth-aes").derive(shared)
+        iv = os.urandom(12)
+        cipher = AESGCM(key).encrypt(iv, _json.dumps(plain).encode(), aad.encode())
+        server_public = server_private.public_key().public_bytes(
+            serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        return {
+            "code": 1,
+            "msg": "success",
+            "data": {
+                "encrypted": True,
+                "handshake": {
+                    "spub_k": b64.b64encode(server_public).decode(),
+                    "salt": b64.b64encode(salt).decode(),
+                    "version": "v1",
+                },
+                "payload": {
+                    "iv": b64.b64encode(iv).decode(),
+                    "cipher_text": b64.b64encode(cipher).decode(),
+                    "aad": aad,
+                    "version": "v1",
+                },
+            },
+        }
+
+    def test_encrypted_response_yields_token(self) -> None:
+        try:
+            import cryptography  # noqa: F401, PLC0415
+        except ImportError:
+            self.skipTest("本机没装 cryptography")
+
+        aad = "vcg-auth:POST:/Auth/Wechat/V2/LoginByWechatCode"
+        seen: dict = {}
+
+        def fake(method, url, **kwargs):
+            body = kwargs.get("json") or {}
+            seen.update(body)
+            envelope = self._make_encrypted_envelope(body["cpub_k"], {"token": "wx-encrypted-token"}, aad)
+            return FakeResponse(200, envelope)
+
+        with patch("vocabgo.net.request", side_effect=fake):
+            result = qrlogin.login_with_wechat_code("061RealLookingCode")
+
+        self.assertTrue(result.ok, result.message)
+        self.assertEqual(result.token, "wx-encrypted-token")
+        self.assertEqual(len(seen["cpub_k"]), 124, "应该是 base64 的 P-256 SPKI 公钥")
+        self.assertEqual(seen["cpub_v"], "v1")
+
+    def test_public_key_is_real_ec_key(self) -> None:
+        """公钥必须是真 P-256 密钥：否则服务端会直接回「加密失败！」"""
+        import base64 as b64  # noqa: PLC0415
+
+        from cryptography.hazmat.primitives import serialization  # noqa: PLC0415
+
+        _private_key, public_b64 = qrlogin._generate_keypair()  # noqa: SLF001
+        key = serialization.load_der_public_key(b64.b64decode(public_b64))
+        self.assertEqual(key.curve.name, "secp256r1")
+
+    def test_encrypted_response_without_key_material_reports_clearly(self) -> None:
+        envelope = {"code": 1, "data": {"encrypted": True, "payload": {"iv": "AA==", "cipher_text": "AA=="}}}
+        with patch("vocabgo.net.request", return_value=FakeResponse(200, envelope)):
+            result = qrlogin.login_with_wechat_code("061RealLookingCode")
+        self.assertFalse(result.ok)
+        self.assertIn("解密失败", result.message)
+
+    def test_expired_code_message_is_actionable(self) -> None:
+        with patch("vocabgo.net.request", return_value=FakeResponse(200, {"code": 0, "msg": "微信服务异常!"})):
+            result = qrlogin.login_with_wechat_code("061Expired")
+        self.assertFalse(result.ok)
+        self.assertIn("重新扫码", result.message, "要告诉用户下一步怎么做")
 
 
 class PasswordLoginTest(unittest.TestCase):

@@ -40,6 +40,8 @@ AUTH_LOGIN = AUTH_BASE + "/Auth/Login"
 AUTH_LOGIN_BEFORE = AUTH_BASE + "/Auth/Login/Before"
 AUTH_LOGIN_BY_ID = AUTH_BASE + "/Auth/Login/ByUserId"
 AUTH_WECHAT_V2 = AUTH_BASE + "/Auth/Wechat/V2/LoginByWechatCode"
+AUTH_KEY_VERSION = "v1"          # 客户端上报的 key 版本
+AUTH_HKDF_INFO = b"vcg-auth-aes"  # HKDF 的 info，来自网页端源码
 
 # 微信扫码登录：词达人自己的公众号 appid 与回调地址（redirect_uri 必须在平台侧注册过，改不了）
 WECHAT_OAUTH = "https://open.weixin.qq.com/connect/oauth2/authorize"
@@ -171,28 +173,111 @@ def extract_wechat_code(text: str) -> str:
     return ""
 
 
+def _generate_keypair() -> tuple[Any, str]:
+    """本地生成 P-256 密钥对，返回 (私钥, base64(SPKI 公钥))。
+
+    与网页端一致：``crypto.subtle.generateKey({name:"ECDH", namedCurve:"P-256"})``
+    然后 ``exportKey("spki", publicKey)`` 再 base64。
+    """
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    public_b64 = base64.b64encode(
+        private_key.public_key().public_bytes(
+            serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+    ).decode("ascii")
+    return private_key, public_b64
+
+
+def decrypt_auth_response(envelope: dict[str, Any], private_key: Any) -> dict[str, Any]:
+    """解密「服务端用我们公钥加密」的响应。
+
+    与网页端一致：
+
+    1. ECDH(我们的私钥, 服务端公钥 spub_k) → 共享密钥
+    2. HKDF-SHA256(共享密钥, salt, info="vcg-auth-aes") → 256 位 AES 密钥
+    3. AES-GCM(iv, cipher_text, aad) 解密 → 明文 JSON
+    """
+    import json as _json
+
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+    data = envelope.get("data") if isinstance(envelope.get("data"), dict) else envelope
+    handshake = data.get("handshake") or {}
+    payload = data.get("payload") or {}
+    if isinstance(handshake, str):
+        handshake = _json.loads(handshake)
+    if isinstance(payload, str):
+        payload = _json.loads(payload)
+
+    server_public_b64 = handshake.get("spub_k") or handshake.get("serverPublicKey") or ""
+    salt_b64 = handshake.get("salt") or ""
+    if not server_public_b64 or not salt_b64:
+        raise ValueError("响应里缺少 spub_k / salt，无法解密")
+
+    server_key = serialization.load_der_public_key(base64.b64decode(server_public_b64))
+    shared_secret = private_key.exchange(ec.ECDH(), server_key)
+    aes_key = HKDF(
+        algorithm=hashes.SHA256(), length=32, salt=base64.b64decode(salt_b64), info=AUTH_HKDF_INFO
+    ).derive(shared_secret)
+
+    iv = base64.b64decode(payload.get("iv") or "")
+    cipher_text = base64.b64decode(payload.get("cipher_text") or payload.get("cipherText") or "")
+    aad = payload.get("aad")
+    plain = AESGCM(aes_key).decrypt(iv, cipher_text, aad.encode("utf-8") if aad else None)
+    return _json.loads(plain.decode("utf-8"))
+
+
 def login_with_wechat_code(code: str) -> LoginResult:
     """用微信授权回来的 code 换令牌（学生端 /authorize 页用的就是这个接口）。
 
-    参数名与结构来自学生端 JS：``postAuthorizeLoginNew({code, cpub_k, cpub_v})``。
-    实测 cpub_k / cpub_v 只是客户端标识，服务端不会因为占位值拒绝请求，
-    所以这里填一个结构合法的占位值即可。
+    网页端源码里的完整链路：
+
+    - 本地生成 ECDH P-256 密钥对，公钥 base64(SPKI) 作为 ``cpub_k`` 一起提交
+    - 服务端用这个公钥加密响应（所以公钥非法时它直接报「加密失败！」）
+    - 客户端用私钥解出明文，明文里才是 ``token``
     """
     code = (code or "").strip()
     if not code:
         return LoginResult(False, message="没识别到微信 code —— 请把微信里那条链接整段粘过来")
-    placeholder_key = base64.b64encode(b"\x00" * 64).decode("ascii")
+
     try:
-        body = _auth_post(AUTH_WECHAT_V2, {"code": code, "cpub_k": placeholder_key, "cpub_v": VERSION})
+        private_key, cpub_k = _generate_keypair()
+    except Exception as exc:
+        return LoginResult(False, message=f"本机缺少加密组件（需要 cryptography 库）：{exc}")
+
+    try:
+        body = _auth_post(
+            AUTH_WECHAT_V2, {"code": code, "cpub_k": cpub_k, "cpub_v": AUTH_KEY_VERSION}
+        )
     except Exception as exc:
         return LoginResult(False, message=str(exc))
 
-    if body.get("encrypted"):
-        return LoginResult(
-            False,
-            message="服务端这次返回了加密数据，这条登录路走不通；请改用账号密码登录，或用抓包方式",
-        )
-    return _result_from(body)
+    data = body.get("data")
+    if body.get("code") == 1 and isinstance(data, dict) and data.get("encrypted"):
+        try:
+            inner = decrypt_auth_response(body, private_key)
+        except Exception as exc:
+            return LoginResult(False, message=f"服务端返回了加密数据，但解密失败：{exc}")
+        token = str(inner.get("token") or "")
+        if token:
+            return LoginResult(True, token=token)
+        return LoginResult(False, message=f"解密成功但响应里没有令牌：{str(inner)[:120]}")
+
+    if body.get("code") == 1 and isinstance(data, dict) and data.get("token"):
+        return LoginResult(True, token=str(data["token"]))  # 万一服务端返回明文
+
+    result = _result_from(body)
+    if "微信服务异常" in result.message:
+        result.message = "微信服务异常 —— 一般是这条链接里的 code 已经过期或用过了（只能用一次、约 5 分钟），请重新扫码"
+    elif "加密失败" in result.message:
+        result.message = "服务端没能用我们的公钥加密响应，请把这条错误反馈给作者"
+    return result
 
 
 def headers_for(token: str = "") -> dict[str, str]:

@@ -140,6 +140,30 @@ def cmd_login_captcha(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_wxlogin(args: argparse.Namespace) -> int:
+    """用微信扫码后的那条链接（或直接 code）换令牌 —— 扫码登录的命令行版。"""
+    from .qrlogin import extract_wechat_code, login_and_save, login_with_wechat_code
+
+    config = load_config(args.config)
+    raw = args.url or args.code
+    if not raw:
+        raw = input("把微信里「复制链接」得到的那条链接粘进来：").strip()
+    code = extract_wechat_code(raw)
+    if not code:
+        print("❌ 没从粘贴的内容里识别出 code（应当是链接里的 code=xxxx 那段）")
+        return 1
+
+    print(f"🔑 正在用 code 换令牌（{code[:8]}…）")
+    result = login_with_wechat_code(code)
+    if result.ok:
+        path = login_and_save(result, (config.get("_path") if args.config else None))
+        print(f"✅ 登录成功，令牌已写入 {path}")
+        print(f"   令牌：{result.token[:10]}…（可用 python -m vocabgo check 复验）")
+        return 0
+    print(f"❌ 失败：{result.message}")
+    return 1
+
+
 def cmd_check(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     client = build_client(config, debug=args.debug)
@@ -448,6 +472,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_captcha = sub.add_parser("captcha", help="取一张图形验证码（给 login --id 用）")
     p_captcha.add_argument("--out", default="", help="保存路径，默认 验证码.png")
     p_captcha.set_defaults(func=cmd_login_captcha)
+
+    p_wx = sub.add_parser("wxlogin", help="用微信扫码后那条链接换令牌（扫码登录的命令行版）")
+    p_wx.add_argument("--url", default="", help="微信里「复制链接」得到的那整条链接")
+    p_wx.add_argument("--code", default="", help="也可以直接给 code")
+    p_wx.set_defaults(func=cmd_wxlogin)
 
     p_tasks = sub.add_parser("tasks", help="列出任务")
     p_tasks.add_argument("--kind", choices=["class", "study"], default="class")

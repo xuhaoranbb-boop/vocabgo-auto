@@ -1,11 +1,6 @@
-# 运行必需
+﻿# 运行必需
 requests>=2.28
 certifi>=2023.1.1
 qrcode>=7.4          # 「扫码授权」在界面里弹二维码用（打包时会一起带上）
 pillow>=9.0          # qrcode 生成 PNG 需要
-
-# 可选：抓包获取 token（tools/mitm_capture.py）
-# mitmproxy>=10.0
-#
-# 可选：二维码授权（tools/qr_login.py 的图形二维码）
-# qrcode[pil]>=7.4
+cryptography>=41     # 微信扫码登录：ECDH P-256 + HKDF + AES-GCM 解密服务端响应

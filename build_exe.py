@@ -88,6 +88,10 @@ def run_pyinstaller(name: str, entry: str, *, windowed: bool, onefile: bool, ico
         "certifi",
         "--collect-submodules",
         "qrcode",  # 二维码展示要用，必须打进包里
+        "--collect-submodules",
+        "cryptography",  # 微信扫码登录要用的加解密
+        "--hidden-import",
+        "cryptography.hazmat.backends.openssl",
         "--windowed" if windowed else "--console",
         "--onefile" if onefile else "--onedir",
     ]
