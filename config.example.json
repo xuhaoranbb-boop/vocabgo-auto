@@ -1,0 +1,37 @@
+{
+  "auth": {
+    "usertoken": "",
+    "abc": "",
+    "authorization_v": ""
+  },
+  "llm": {
+    "provider": "deepseek",
+    "url": "https://api.deepseek.com",
+    "key": "",
+    "model": "deepseek-v4-flash",
+    "vision_model": "deepseek-flash",
+    "thinking": "off"
+  },
+  "vision": {
+    "backend": "auto",
+    "tesseract_cmd": ""
+  },
+  "network": {
+    "proxy": "",
+    "use_system_proxy": false
+  },
+  "study": {
+    "course_id": "CET4_v2",
+    "grade": 2
+  },
+  "runtime": {
+    "pace": [1.0, 2.6],
+    "probe": true,
+    "ocr": true,
+    "max_score": 10,
+    "loop": 3,
+    "kind": "class",
+    "last_task_id": "",
+    "bank_path": ""
+  }
+}

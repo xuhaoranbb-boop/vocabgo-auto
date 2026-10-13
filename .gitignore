@@ -1,0 +1,23 @@
+# 凭据与运行时产物，别提交
+config.json
+captured_headers.json
+bank.json
+bank.json.lock
+授权二维码.png
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 打包产物
+build/
+dist/
+release/
+*.spec
+selftest.txt
+
+# 编辑器
+.idea/
+.vscode/

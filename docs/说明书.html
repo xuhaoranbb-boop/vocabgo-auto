@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>词达人自动答题工具 · 使用说明书</title>
+<style>
+  :root { --ink:#1f2933; --sub:#52606d; --line:#dfe3e8; --brand:#1e3a5f; --brand2:#2f6fb0; --bg:#f7f8fa; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font-family:"Microsoft YaHei","PingFang SC","Hiragino Sans GB",-apple-system,"Segoe UI",sans-serif;
+         line-height:1.75; font-size:15px; }
+  .page { max-width:940px; margin:0 auto; background:#fff; padding:48px 56px 72px;
+          box-shadow:0 1px 3px rgba(0,0,0,.08); }
+  h1 { font-size:30px; margin:0 0 6px; color:var(--brand); letter-spacing:.5px; }
+  .subtitle { color:var(--sub); margin:0 0 4px; }
+  .meta { color:#9aa5b1; font-size:13px; margin-bottom:28px; }
+  h2 { font-size:21px; margin:42px 0 14px; padding-bottom:8px; border-bottom:2px solid var(--line); color:var(--brand); }
+  h3 { font-size:17px; margin:26px 0 10px; color:var(--brand2); }
+  h4 { font-size:15px; margin:20px 0 8px; }
+  p { margin:9px 0; }
+  ul, ol { margin:9px 0; padding-left:24px; }
+  li { margin:5px 0; }
+  code { background:#eef1f5; padding:1px 6px; border-radius:4px; font-family:Consolas,"Courier New",monospace; font-size:13.5px; }
+  pre { background:#212a33; color:#e6edf3; padding:14px 16px; border-radius:8px; overflow:auto; font-size:13.5px; line-height:1.7; }
+  pre code { background:none; color:inherit; padding:0; }
+  table { border-collapse:collapse; width:100%; margin:12px 0; font-size:14px; }
+  th, td { border:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top; }
+  th { background:#f0f4f8; font-weight:600; }
+  tr:nth-child(even) td { background:#fafbfc; }
+  .note, .warn, .tip { border-left:4px solid; padding:10px 14px; margin:14px 0; border-radius:0 6px 6px 0; font-size:14px; }
+  .note { background:#f0f6fc; border-color:var(--brand2); }
+  .warn { background:#fff6f0; border-color:#d97706; }
+  .tip  { background:#f2fbf5; border-color:#2f9e44; }
+  .note b, .warn b, .tip b { display:block; margin-bottom:3px; }
+  .toc { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:16px 22px; margin:24px 0 8px; }
+  .toc ol { padding-left:22px; margin:6px 0; }
+  .toc a { color:var(--brand2); text-decoration:none; }
+  .toc a:hover { text-decoration:underline; }
+  .steps { counter-reset:step; list-style:none; padding-left:0; }
+  .steps > li { counter-increment:step; position:relative; padding-left:44px; margin:16px 0; }
+  .steps > li::before { content:counter(step); position:absolute; left:0; top:1px;
+      width:28px; height:28px; border-radius:50%; background:var(--brand); color:#fff;
+      display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:700; }
+  img { max-width:100%; border:1px solid var(--line); border-radius:8px; margin:12px 0; }
+  .cap { color:var(--sub); font-size:13px; text-align:center; margin:-4px 0 18px; }
+  .kbd { border:1px solid #c9cdd2; border-bottom-width:2px; border-radius:4px; padding:0 5px; font-size:12.5px; background:#fff; }
+  footer { margin-top:48px; padding-top:18px; border-top:1px solid var(--line); color:#9aa5b1; font-size:13px; }
+  .badge { display:inline-block; background:#e7f0fa; color:var(--brand2); border-radius:4px; padding:1px 8px; font-size:12.5px; margin-left:6px; }
+  @media print { body { background:#fff; } .page { box-shadow:none; max-width:none; padding:0 12mm; } h2 { page-break-after:avoid; } }
+</style>
+</head>
+<body>
+<div class="page">
+
+<h1>词达人自动答题工具 · 使用说明书</h1>
+<p class="subtitle">微信「词达人」（vocabgo / 外教社学生端）班级任务 + 自学任务自动作答</p>
+<p class="meta">版本 v2.0.0　·　适用系统 Windows 10 / 11（64 位）　·　免安装</p>
+
+<div class="toc">
+  <b>目录</b>
+  <ol>
+    <li><a href="#ch1">这是什么</a></li>
+    <li><a href="#ch2">3 分钟上手</a></li>
+    <li><a href="#ch3">推荐配置（含每项为什么这么设）</a></li>
+    <li><a href="#ch4">详细教程</a></li>
+    <li><a href="#ch5">界面说明书（每个按钮干什么）</a></li>
+    <li><a href="#ch6">它是怎么答对题的</a></li>
+    <li><a href="#ch7">常见问题</a></li>
+    <li><a href="#ch8">稳定性与注意事项</a></li>
+    <li><a href="#ch9">文件位置与卸载</a></li>
+    <li><a href="#appendix">附录：全部配置项 / 命令行用法</a></li>
+  </ol>
+</div>
+
+<h2 id="ch1">1. 这是什么</h2>
+<p>一个把「词达人」里重复的单词练习自动做完的小工具。你只需要在第一次使用时做两件事：<b>填一个大模型密钥</b>、<b>用微信扫一下码</b>。之后每次打开就能直接开刷。</p>
+
+<h3>它能做什么</h3>
+<ul>
+  <li>自动完成<b>班级任务</b>与<b>自学任务</b>，覆盖全部题型（单词记忆、词义选择、句中选义、短语排序、搭配多选）</li>
+  <li>自动<b>选满所有词</b>、自动<b>签到</b>、按阈值<b>重练未满分的词</b>直到刷满</li>
+  <li>答完的题会进本地题库，<b>越用越快</b>（同一道题第二次直接命中）</li>
+  <li>题干/选项意外变成图片时，自动调用大模型或本地识别把文字读出来</li>
+  <li>日志实时可见，命中来源一目了然（题库 / 规则 / 试答案 / 大模型）</li>
+</ul>
+
+<h3>它不做什么</h3>
+<ul>
+  <li>不破解、不绕开平台鉴权 —— 用的是你<b>本人账号</b>的正常接口，和网页版点按钮等价</li>
+  <li>不帮你登录 —— 令牌必须由你本人微信扫码产生</li>
+  <li>不保证 100% 不被平台发现（见第 8 章「稳定性与注意事项」）</li>
+</ul>
+
+<div class="warn">
+  <b>使用前请知悉</b>
+  自动化操作属于平台规则里的灰色地带，平台随时可能调整接口或加强风控。请用自己的账号、按第 8 章的节奏使用，不要一次刷爆、不要多人共用同一个账号。
+</div>
+
+<h2 id="ch2">2. 3 分钟上手</h2>
+
+<ol class="steps">
+  <li>
+    <b>解压并打开</b><br>
+    把压缩包解压到任意文件夹（<b>不要</b>放在 C 盘系统目录里），双击 <code>Vocabgo.exe</code>。首次启动 Windows 可能弹「已保护你的电脑」，点「更多信息」→「仍要运行」。
+  </li>
+  <li>
+    <b>填大模型密钥（只要一个 key）</b><br>
+    切到「<b>设置</b>」页 → 点「<b>⭐ 一键填入推荐配置</b>」（地址、模型名会自动带好）→ 在「接口密钥」里粘贴你的 DeepSeek 密钥 → 点右边的「<b>💾 保存配置</b>」。<br>
+    密钥在 <a href="https://platform.deepseek.com" target="_blank">platform.deepseek.com</a> 注册后创建，几块钱能用很久。
+  </li>
+  <li>
+    <b>微信扫码授权</b><br>
+    回到「<b>刷题</b>」页 → 点「<b>扫码授权（推荐）</b>」→ 程序会弹出二维码图片，用<b>手机微信扫一扫</b>并确认 → 界面上的「用户令牌」会自动填好。
+  </li>
+  <li>
+    <b>选任务，开刷</b><br>
+    点「<b>刷新任务</b>」→ 在列表里点一下要刷的那条 → 点「<b>▶ 开始刷题</b>」。剩下的交给它，日志区会一行行告诉你进展。
+  </li>
+</ol>
+
+<div class="tip">
+  <b>下次使用</b>
+  直接双击 <code>Vocabgo.exe</code>，点「刷新任务」→「开始刷题」即可。密钥、地址、模型、节奏、上次刷的任务都会自动带出来。
+</div>
+
+<h2 id="ch3">3. 推荐配置</h2>
+<p>程序里点「⭐ 一键填入推荐配置」就是下面这套值。它针对「<b>稳定拿高分、又不显得像机器</b>」这一目标调的：</p>
+
+<table>
+  <thead><tr><th style="width:22%">项目</th><th style="width:26%">推荐值</th><th>为什么这么设</th></tr></thead>
+  <tbody>
+    <tr><td>服务商</td><td>DeepSeek</td><td>答题兜底 + 读图一把 key 搞定，价格低</td></tr>
+    <tr><td>答题模型</td><td><code>deepseek-v4-flash</code></td><td>从选项里挑答案这种短任务，够用、快、便宜</td></tr>
+    <tr><td>读图模型</td><td><code>deepseek-flash</code></td><td>支持图片输入，题干万一变成图片也能认出来</td></tr>
+    <tr><td>思考模式</td><td>关闭</td><td>每题都推理会又慢又贵，短答提取不需要</td></tr>
+    <tr><td>作答间隔</td><td>1.5 ~ 3.5 秒</td><td>比默认再慢一点，更像人在做题，降低被风控关注</td></tr>
+    <tr><td>试答案兜底</td><td>开启</td><td>生词也能先判对再提交，分数不会掉</td></tr>
+    <tr><td>读图</td><td>开启（自动）</td><td>有模型时用模型，没有就退回本地识别，不影响流程</td></tr>
+    <tr><td>练习轮数</td><td>3</td><td>自动重练没满分的词，把分追满</td></tr>
+    <tr><td>满分阈值</td><td>10</td><td>10 分制下的满分线</td></tr>
+  </tbody>
+</table>
+
+<p>程序目录里另外附了一份 <code>config.推荐.json</code>，内容与上面一致。如果你想手动替换配置，把它改名为 <code>config.json</code> 覆盖即可（记得重新填密钥和令牌）。</p>
+
+<div class="note">
+  <b>只填密钥也能跑</b>
+  其他项都有默认值：万一你没配大模型，程序会自动退回「本地题库 + 规则匹配 + 试答案」链路，仍然能做完；只是遇到生词时准确率不如接了大模型。
+</div>
+
+<h2 id="ch4">4. 详细教程</h2>
+
+<h3>4.1 安装与启动</h3>
+<p><b>免安装版（推荐）</b>：解压后双击 <code>Vocabgo.exe</code>。整个文件夹可以放在桌面或 D 盘任意位置，也可以拷到 U 盘带走。</p>
+<p><b>源码运行（进阶）</b>：需要 Python 3.10+，在项目目录执行：</p>
+<pre><code>pip install -r requirements.txt
+python vocabgo_app.py</code></pre>
+
+<h3>4.2 获取用户令牌</h3>
+<p>令牌（UserToken）是程序代表你操作账号的凭据，<b>必须由你本人产生</b>。三种方式，优先用第一种：</p>
+
+<h4>方式 A：扫码授权（推荐，不用抓包）</h4>
+<ol>
+  <li>点「扫码授权（推荐）」</li>
+  <li>程序弹出二维码图片（同时会打开程序目录），用手机微信扫描并确认授权</li>
+  <li>界面上的「用户令牌」自动填好，日志显示 <code>✅ 已获取用户令牌</code></li>
+</ol>
+<div class="note">
+  <b>扫不了码怎么办</b>
+  日志区会同时打印一条授权链接。把这条链接复制到微信任意聊天窗口（比如「文件传输助手」），用微信点开，同样能完成授权。
+</div>
+
+<div class="tip">
+  <b>如果提示「扫码授权接口都不可用 / HTTP 404」</b>
+  说明平台又把这个接口搬家了。程序会自动把已知的域名都试一遍（新域名优先、老域名兜底），
+  两个都不行时日志会列出每个域名各自的返回。这种情况下请改用下面的<b>方式 B（抓包）</b>，
+  拿到令牌后填进界面即可 —— 答题链路和扫码无关，抓包拿到令牌一样能用。
+</div>
+
+<h4>方式 B：抓包（最稳，适合折腾）</h4>
+<pre><code>pip install mitmproxy
+mitmdump -s tools/mitm_capture.py</code></pre>
+<p>然后让电脑上的微信走 <code>127.0.0.1:8080</code> 代理，打开「词达人」公众号 → 学生端，随便点进一个任务页面。插件会自动把三个字段写进配置文件：</p>
+<table>
+  <thead><tr><th style="width:26%">字段</th><th>是什么</th></tr></thead>
+  <tbody>
+    <tr><td><code>usertoken</code></td><td>用户令牌，代表你账号的凭据。<b>必须由你本人产生</b>（扫码）</td></tr>
+    <tr><td><code>abc</code></td><td>平台的一道反爬校验，值 = <b>md5(客户端 User-Agent)</b>。<b>留空即可</b>，程序会自己算</td></tr>
+    <tr><td><code>authorization-v</code></td><td>同类的版本标记，值是固定的 <code>md5("0")</code>。<b>留空即可</b></td></tr>
+  </tbody>
+</table>
+<p>界面上的「abc 字段」「authorization-v 字段」就是后两个。它们<b>留空也能跑</b>：程序按当前 UA 自动推算，抓包填了真值则优先用真值。</p>
+
+<div class="note">
+  <b>这两个名字为什么这么奇怪</b>
+  平台故意用了没意义的名字（<code>abc</code>）和带横杠的伪版本号（<code>authorization-v</code>）来降低可读性。它们的构成是从公开的开源实现里还原出来的：
+  <code>Abc = md5(User-Agent)</code>、<code>Authorization-V = md5("0")</code> —— 也就是「请求头 UA 和 abc 必须配套」这种低成本校验。
+  所以换了客户端 UA，abc 就得跟着换；这也是为什么老教程都让你"抓包原样抄"。
+  <br>依据：开源实现 <code>api/request_header.py</code> 中 <code>"Abc": encrypt_md5(user_age)</code>，以及被硬编码的 <code>cfcd208495d565ef66e7dff9f98764da</code>（正是 <code>md5("0")</code>）。
+</div>
+
+<div class="tip">
+  <b>所以：不抓包也能用</b>
+  扫码授权只能拿到 <code>usertoken</code>，另两个字段由程序推算。如果哪天推算值被服务端拒绝（会提示你抓包），再用下面方式 B 补真值即可。
+</div>
+
+<h4>方式 C：微信 OAuth 链接</h4>
+<p>把下面这条链接发到电脑微信里点开，从浏览器地址栏里复制 <code>code=</code> 后面那串，填进配置文件的 <code>code</code> 字段：</p>
+<pre><code>https://open.weixin.qq.com/connect/oauth2/authorize?appid=wx2a694105a6abbe6d&amp;redirect_uri=https%3A%2F%2Fapp.vocabgo.com%2Fstudent%2F%3Fauthorize%3D0&amp;response_type=code&amp;scope=snsapi_userinfo&amp;state=STATE</code></pre>
+
+<div class="warn">
+  <b>令牌会失效</b>
+  使用时<b>不要在手机或其它设备上登录词达人</b>，一旦在别处登录，令牌会被刷新失效。真失效了重新扫码即可。界面上点「测试连接」可以随时确认令牌是否有效。
+</div>
+
+<h3>4.3 配置大模型</h3>
+<ol class="steps">
+  <li>「设置」页 → 点「⭐ 一键填入推荐配置」→ 接口地址与两个模型名自动带出</li>
+  <li>在「接口密钥」里粘贴密钥 → 点「<b>💾 保存配置</b>」</li>
+  <li>鼠标点走或按回车时，程序会<b>自动拉取模型列表</b>；也可以点「拉取模型列表」手动拉。拉回来后自动帮你选好「答题模型」和「读图模型」，两个框都能下拉改选</li>
+  <li>点「<b>大模型体检</b>」验证：出现下面三行就说明配好了
+<pre><code>📋 可用模型 3 个：deepseek-v4-flash, deepseek-v4-pro, deepseek-flash
+💬 对话测试：✅ 模型回了 'OK'
+🖼️ 读图测试：✅ 识别为 'abandon'</code></pre>
+  </li>
+</ol>
+
+<div class="tip">
+  <b>密钥存在哪？安全吗？</b>
+  存在程序目录的 <code>config.json</code> 里，明文。别把这个文件发到群里，也别把整个文件夹连密钥一起分享给别人 —— 发之前先把密钥删掉。
+</div>
+
+<h3>4.4 选任务并开始刷题</h3>
+<p>切到「刷题」页：</p>
+<img src="界面-刷题页.png" alt="刷题页界面">
+<p class="cap">刷题页：上半部分是账号与任务，下半部分是实时日志</p>
+<ol>
+  <li>选择任务类型：<b>班级任务</b>（老师布置的）或 <b>自学任务</b>（自己练的，需要填课程代码，默认 <code>CET4_v2</code>）</li>
+  <li>点「<b>刷新任务</b>」，下面的列表会列出你可做的任务（名称 / 进度 / 得分 / 编号）</li>
+  <li>点一下要刷的那条（下次打开会自动选回上次那条）</li>
+  <li>点「<b>▶ 开始刷题</b>」</li>
+</ol>
+
+<h3>4.5 看日志：每道题是怎么答对的</h3>
+<p>日志里每行末尾的方括号就是这道题的命中来源：</p>
+<table>
+  <thead><tr><th>标记</th><th>含义</th><th>风险</th></tr></thead>
+  <tbody>
+    <tr><td><code>[题库]</code></td><td>以前答过，直接命中本地题库</td><td>最低</td></tr>
+    <tr><td><code>[规则]</code></td><td>用「单词记忆」题学到的词义表直接选中正确释义</td><td>很低</td></tr>
+    <tr><td><code>[试答案]</code></td><td>先故意答错，从服务端返回里套出正确答案，再用正确答案重判一次</td><td>中（会留下错误作答轨迹）</td></tr>
+    <tr><td><code>[大模型]</code></td><td>交给 DeepSeek 判断</td><td>很低</td></tr>
+    <tr><td><code>[猜测]</code></td><td>实在没辙盲选（正常应该看不到）</td><td>高</td></tr>
+  </tbody>
+</table>
+<p>一趟刷完会打印统计，例如：</p>
+<pre><code>🎉 结束：120/120　进度 120/120 | 题库 96 | 规则 18 | 试答案 6 | LLM 0 | 猜测 0 | 服务端纠错 0</code></pre>
+<p>「题库」越大、「试答案」越小，说明你账号上的作答轨迹越干净。<b>想更干净</b>：配好大模型后，取消勾选「试答案兜底」。</p>
+
+<h3>4.6 把分追满</h3>
+<ul>
+  <li>「<b>练习轮数</b>」设 3：刷完一轮后自动重开一轮，只练没到满分的词</li>
+  <li>「<b>满分阈值</b>」设 10：10 分制的满分线；想更快结束可调到 9</li>
+  <li>中途想停就点「⏹ 停止」，会在当前这题收尾后停下，题库照常保存</li>
+</ul>
+
+<h3>4.7 换账号 / 换电脑 / 备份</h3>
+<ul>
+  <li><b>换账号</b>：清空「用户令牌」→ 重新扫码授权</li>
+  <li><b>换电脑</b>：把整个文件夹拷过去即可，配置和题库都在里面</li>
+  <li><b>备份题库</b>：复制 <code>bank.json</code>；它是纯文本，可以用记事本看</li>
+  <li><b>多账号</b>：每个账号复制一份完整文件夹，互不干扰</li>
+</ul>
+
+<h2 id="ch5">5. 界面说明书</h2>
+
+<h3>刷题页</h3>
+<table>
+  <thead><tr><th style="width:24%">控件</th><th>作用</th></tr></thead>
+  <tbody>
+    <tr><td>用户令牌</td><td>账号凭据，扫码或抓包后自动填入，也可手动粘贴</td></tr>
+    <tr><td>abc 字段 / authorization-v 字段</td><td>平台的接口校验字段。<b>留空即自动推算</b>（abc = md5(UA)，authorization-v = md5("0")）；抓包填了真值则优先用真值</td></tr>
+    <tr><td>扫码授权（推荐）</td><td>弹出二维码，用微信扫一下拿到令牌</td></tr>
+    <tr><td>测试连接</td><td>检查令牌是否还有效（失效了就重新扫码）</td></tr>
+    <tr><td>说明</td><td>弹出三种获取令牌的方式</td></tr>
+    <tr><td>班级任务 / 自学任务</td><td>切换任务类型；自学任务需要旁边填课程代码</td></tr>
+    <tr><td>刷新任务</td><td>从服务器拉取当前可做的任务列表</td></tr>
+    <tr><td>练习轮数</td><td>刷几轮（追满分用，默认 3）</td></tr>
+    <tr><td>满分阈值</td><td>低于该分数的词才重练（默认 10）</td></tr>
+    <tr><td>试答案兜底</td><td>开启时生词靠「先错两次套答案」拿分；关掉则更依赖大模型</td></tr>
+    <tr><td>读图</td><td>题干/选项是图片时自动识别成文字</td></tr>
+    <tr><td>▶ 开始刷题 / ⏹ 停止</td><td>开始与安全停止（当前题收尾后停）</td></tr>
+    <tr><td>日志区</td><td>实时输出，出问题时可整段复制给别人看</td></tr>
+  </tbody>
+</table>
+
+<h3>设置页</h3>
+<img src="界面-设置页.png" alt="设置页界面">
+<p class="cap">设置页：服务商、地址、模型、密钥、读图方式、作答节奏</p>
+<table>
+  <thead><tr><th style="width:24%">控件</th><th>作用</th></tr></thead>
+  <tbody>
+    <tr><td>服务商</td><td>DeepSeek / OpenAI / 本地 Ollama / 自定义，切换会自动带出地址与模型名</td></tr>
+    <tr><td>接口密钥</td><td>粘贴你的 key，右边「💾 保存配置」立即落盘</td></tr>
+    <tr><td>接口地址</td><td>自动填好，走中转站时手改</td></tr>
+    <tr><td>答题模型 / 读图模型</td><td>下拉可选，会从接口自动拉取</td></tr>
+    <tr><td>拉取模型列表</td><td>手动拉一次可用模型（填完密钥也会自动拉）</td></tr>
+    <tr><td>思考模式</td><td>建议「关闭」：短答任务开思考又慢又贵</td></tr>
+    <tr><td>读图方式</td><td>自动 / 大模型 / 本地识别 / 百度 / 关闭；右边会显示本地识别程序是否就绪</td></tr>
+    <tr><td>读图体检</td><td>生成一张测试图真跑一遍识别</td></tr>
+    <tr><td>作答间隔</td><td>每题的随机等待范围，推荐 1.5 ~ 3.5 秒</td></tr>
+    <tr><td>代理</td><td><b>留空 = 直连（推荐）</b>。程序默认忽略系统/环境代理；确实要走代理才填地址，或勾选「跟随系统代理」</td></tr>
+    <tr><td>⭐ 一键填入推荐配置</td><td>把第 3 章那套值一次填好（不动你的密钥和令牌）</td></tr>
+    <tr><td>大模型体检</td><td>测试：模型列表 / 对话 / 读图 三项</td></tr>
+    <tr><td>打开程序目录</td><td>打开软件所在文件夹，方便找 <code>config.json</code></td></tr>
+  </tbody>
+</table>
+
+<div class="note">
+  <b>配置会自动保存</b>
+  密钥填完（点走或回车）、下拉框改选、勾选框切换，都会立刻写进 <code>config.json</code>；关闭窗口时还会再存一次。所以下次打开不用重新配。
+</div>
+
+<h2 id="ch6">6. 它是怎么答对题的</h2>
+<p>每道题按下面的顺序尝试，命中就停：</p>
+<pre><code>读图 → 题库 → 规则匹配 → 试答案 → 大模型 → 盲选</code></pre>
+<table>
+  <thead><tr><th style="width:18%">环节</th><th>做什么</th></tr></thead>
+  <tbody>
+    <tr><td>读图</td><td>题干/选项以图片下发时，先识别成文字（题目正常情况下是纯文本，这一步一般用不到）</td></tr>
+    <tr><td>题库</td><td>题目指纹命中本地缓存，直接给出上次的正确答案</td></tr>
+    <tr><td>规则匹配</td><td>「单词记忆」题型本身会给出单词的全部释义，程序顺手记下，后面的选择题直接查表；搭配题里服务端把答案词放在备注里，也能直接取</td></tr>
+    <tr><td>试答案</td><td>连续提交两次错误答案后，服务端会回吐本题正确答案；拿到后<b>再用正确答案重新判一次</b>，所以最终记录的仍是正确作答</td></tr>
+    <tr><td>大模型</td><td>把题干和选项交给模型判断（一词多义、短语排序这类题最有用）</td></tr>
+  </tbody>
+</table>
+<p>答过的题会写回 <code>bank.json</code>，所以<b>同一套词练第二遍几乎全是「题库」命中，又快又干净</b>。</p>
+
+<h2 id="ch7">7. 常见问题</h2>
+
+<h4>Q1：提示「用户令牌已失效」</h4>
+<p>最常见的原因是你在手机或别的电脑上登录了词达人，令牌被刷新了。重新点「扫码授权」即可。</p>
+
+<h4>Q2：扫码后一直没反应</h4>
+<p>确认是用<b>手机微信</b>扫的（不是相机、不是微信扫一扫的「识物」），并在手机上点了「同意」。超过 5 分钟会超时，再点一次「扫码授权」。</p>
+
+<h4>Q3：报「余额不足 / 401 / 无效的 API key」</h4>
+<p>密钥不对或余额用完了。到服务商控制台检查密钥、充值，然后点「大模型体检」复验。</p>
+
+<h4>Q4：拉不到模型列表</h4>
+<p>不影响使用 —— 只是该服务商没提供模型列表接口。手动把模型名填进「答题模型」即可（DeepSeek 填 <code>deepseek-v4-flash</code>）。</p>
+
+<h4>Q5：分数没满</h4>
+<p>把「练习轮数」调到 3~5、「满分阈值」保持 10，程序会自动重练未满分的词。</p>
+
+<h4>Q6：日志出现「试答案纠正失败，按现状提交」</h4>
+<p>极少数题型服务端不给答案。这一题会被记为错，下一轮重练会再试一次。如果频繁出现，把日志整段发给作者。</p>
+
+<h4>Q7：界面提示「没查到任务」</h4>
+<p>可能原因：令牌失效；老师还没发布任务；任务已全部完成（把「任务筛选」理解为「全部」）。</p>
+
+<h4>Q8：自学任务报错</h4>
+<p>自学任务第一次选词偶发报错是平台侧的老现象，再点一次「开始刷题」通常就好。</p>
+
+<h4>Q9：换电脑后要重新配吗</h4>
+<p>不用。把整个文件夹拷过去，配置与题库都在里面。只有令牌可能因为异地登录失效，重新扫码即可。</p>
+
+<h4>Q10：会被封号吗</h4>
+<p>见下一章。简单说：按推荐节奏、别多设备乱登录、别一口气刷完整个自学任务，风险可控但不为零。</p>
+
+<h4>Q11：界面上的「abc 字段」到底是啥</h4>
+<p>平台的接口校验字段，值 = <b>md5(你的客户端 User-Agent)</b>；旁边的 <code>authorization-v</code> 是同类标记，值固定为 <b>md5("0")</b>。两个都<b>可以留空</b> —— 程序会自己推算。抓包填了真值就优先用真值。</p>
+
+<h4>Q12：日志里出现 ProxyError / JSONDecodeError / 「目标计算机积极拒绝」</h4>
+<p>这是<b>电脑上的代理在作怪</b>，不是软件坏了。很多人的机器上装过 Clash / V2Ray，系统里留着代理设置（常见的是 <code>127.0.0.1:7890</code>）。代理程序一关，所有联网请求就会失败。</p>
+<p><b>本程序默认直连（会主动忽略系统代理）</b>，所以正常情况下不受影响。如果还是报这类错：</p>
+<ol>
+  <li>到「设置」页看「代理」那一行：确认<b>留空</b>、且<b>没有</b>勾选「跟随系统代理」</li>
+  <li>确实需要走代理（比如校园网限制），才在那一行填代理地址，例如 <code>http://127.0.0.1:7890</code></li>
+  <li>拿不准就把代理程序打开再试，或临时关掉系统代理</li>
+</ol>
+
+<h4>Q13：提示「连不上服务器 / 请求超时」</h4>
+<p>先确认网络本身正常（浏览器能打开网页）。如果开了 VPN / 加速器，关掉再试 —— 词达人是国内服务，走代理反而更慢更不稳。</p>
+
+<h4>Q14：点「扫码授权」报 404 或「接口都不可用」</h4>
+<p>平台的授权接口会搬家（历史上从 <code>gateway.vocabgo.com</code> 搬到 <code>app.vocabgo.com</code>）。程序会<b>自动把已知域名都试一遍</b>，所以大多数情况下你不用管。若日志显示两个域名都失败：</p>
+<ol>
+  <li>先去程序目录看有没有新版本（作者会跟进更新域名）</li>
+  <li>临时办法：改用<b>抓包</b>拿令牌 —— 答题用的是另一套接口，不受影响</li>
+</ol>
+
+<h4>Q15：日志里出现 <code>code=11003 需安全验证</code></h4>
+<p>表示这次请求没有带上有效的用户令牌（要么没扫码、要么令牌已失效）。重新「扫码授权」或点「测试连接」确认。</p>
+
+<h2 id="ch8">8. 稳定性与注意事项</h2>
+<table>
+  <thead><tr><th style="width:26%">事项</th><th>建议</th></tr></thead>
+  <tbody>
+    <tr><td>作答节奏</td><td>保持 1.5 ~ 3.5 秒。别为了快而改成 0（界面里没有这个选项，改配置文件也别设 0）</td></tr>
+    <tr><td>多设备登录</td><td>刷题期间不要在手机/其它电脑登录词达人，令牌会被挤掉</td></tr>
+    <tr><td>刷题量</td><td>不要一次性刷完整个自学任务，分几次、隔一段时间更稳妥</td></tr>
+    <tr><td>试答案</td><td>会让服务端看到「错两次再对」的轨迹。题库越大它越少；配好大模型后可关掉</td></tr>
+    <tr><td>运行环境</td><td>用正常电脑/微信客户端。模拟器、Xposed 之类的环境风险明显更高</td></tr>
+    <tr><td>接口变更</td><td>平台改接口时工具会失效。表现为报错或大批量「猜测」，此时先看程序目录有没有新版本</td></tr>
+    <tr><td>密钥保管</td><td><code>config.json</code> 里有明文密钥，别直接分享整个文件夹</td></tr>
+  </tbody>
+</table>
+
+<h2 id="ch9">9. 文件位置与卸载</h2>
+<p>所有数据都在程序目录，<b>不写注册表、不装服务</b>：</p>
+<table>
+  <thead><tr><th style="width:30%">文件 / 目录</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td><code>Vocabgo.exe</code></td><td>主程序，双击运行</td></tr>
+    <tr><td><code>_internal\</code></td><td>运行库，不要删也不要单独移动</td></tr>
+    <tr><td><code>config.json</code></td><td>你的全部配置（令牌、密钥、节奏）</td></tr>
+    <tr><td><code>bank.json</code></td><td>本地题库，越用越大，可随时删（删了不影响使用，只是重新积累）</td></tr>
+    <tr><td><code>授权二维码.png</code></td><td>扫码授权时生成的临时图片，可删</td></tr>
+    <tr><td><code>说明书.html</code></td><td>就是本文档</td></tr>
+    <tr><td><code>selftest.txt</code></td><td>环境自检报告，排查问题时有用</td></tr>
+  </tbody>
+</table>
+<p><b>卸载</b>：直接删除整个文件夹即可，没有残留。想保留题库就先把 <code>bank.json</code> 复制出来。</p>
+
+<h2 id="appendix">附录 A：全部配置项（<code>config.json</code>）</h2>
+<pre><code>{
+  "auth": {
+    "usertoken": "",            // 用户令牌（扫码或抓包自动填）
+    "abc": "",                  // 鉴权字段，抓包自动填
+    "authorization_v": ""       // 鉴权字段，抓包自动填
+  },
+  "llm": {
+    "provider": "deepseek",     // 服务商：deepseek / openai / ollama / custom
+    "url": "https://api.deepseek.com",   // 接口地址，选服务商自动带出
+    "key": "",                  // ← 只需要填这个
+    "model": "deepseek-v4-flash",        // 答题模型
+    "vision_model": "deepseek-flash",    // 读图模型
+    "thinking": "off"           // auto / off / on，短答任务建议 off
+  },
+  "vision": {
+    "backend": "auto",          // auto / llm / tesseract / baidu / none
+    "tesseract_cmd": ""         // 留空自动查找本地识别程序
+  },
+  "study": {
+    "course_id": "CET4_v2",     // 自学任务课程代码
+    "grade": 2
+  },
+  "runtime": {
+    "pace": [1.5, 3.5],         // 每题随机等待（秒）
+    "probe": true,              // 试答案兜底
+    "ocr": true,                // 读图
+    "max_score": 10,            // 满分阈值
+    "loop": 3,                  // 练习轮数
+    "kind": "class",            // 上次的任务类型
+    "last_task_id": "",         // 上次刷的任务，下次自动选中
+    "bank_path": ""             // 题库文件，留空 = 程序目录 bank.json
+  },
+  "network": {
+    "proxy": "",                // 留空 = 直连（推荐）；要走代理才填，如 http://127.0.0.1:7890
+    "use_system_proxy": false   // 勾上才去读系统 / 环境变量里的代理
+  }
+}</code></pre>
+
+<h2>附录 B：命令行用法（进阶）</h2>
+<p>发布包里另有一个命令行版本 <code>VocabgoCLI.exe</code>（需要单独下载或从源码运行 <code>python -m vocabgo</code>）：</p>
+<pre><code>python -m vocabgo config --recommend      # 写入推荐配置
+python -m vocabgo check                   # 检查令牌
+python -m vocabgo tasks --kind class      # 列出班级任务
+python -m vocabgo run --kind class --index 0 --loop 3
+python -m vocabgo llm --image             # 大模型体检（含读图测试）
+python -m vocabgo vision --test           # 读图能力体检
+python -m vocabgo run --kind study --course CET4_v2 --index 0</code></pre>
+<p>常用开关：<code>--fast</code>（去掉等待，仅供调试）、<code>--no-probe</code>（关掉试答案）、
+<code>--no-ocr</code>（关掉读图）、<code>--debug</code>（打印每次请求与响应）、<code>--bank 路径</code>（指定题库文件）。</p>
+
+<footer>
+  <p>本工具为学习与效率用途，请在自己账号上使用，遵守平台规则，不要用于代刷、售卖等用途。</p>
+  <p>协议细节参考了若干公开开源实现（github123666/cidaren、ularch/Easy_Cidaren、LangQi99/cidaren、Rain-shadow/cdr、haojiezhe12345/vocabgo-auto），在此致谢。</p>
+  <p>平台接口随时可能调整，工具可能在任何时候失效；遇到问题请附上程序目录里的日志与环境自检报告。</p>
+</footer>
+
+</div>
+</body>
+</html>
