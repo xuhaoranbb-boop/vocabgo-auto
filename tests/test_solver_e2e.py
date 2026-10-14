@@ -36,6 +36,59 @@ class StubReader:
         return self.text
 
 
+class LooseBankMatchTest(unittest.TestCase):
+    """组词题（mode 32）的选项每次都会变，精确指纹必然 miss。
+
+    所以加了「宽松匹配」：忽略选项只在题干+备注上找旧答案。
+    但**只复用内容型答案**（词本身），且每个词都必须能在当前选项池里找到 ——
+    选择题的下标绝对不复用（选项一变下标就是错的，答错扣分）。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp()) / "bank.json"
+        self.bank = Bank(self.tmp)
+        # 造一条「选项和这次不一样」的旧记录
+        self.bank.put(
+            "32::norm::_ _ _::数学公式::twist|formula|mathematical|a",
+            "a mathematical formula",
+            stem="_  _  _ (数学公式)",
+            flush=False,
+        )
+        self.solver = Solver(VocabgoClient("tok"), bank=self.bank, logger=lambda _m: None)
+
+    @staticmethod
+    def _phrase_topic(options: list[str], remark: str = "数学公式") -> dict:
+        return {
+            "topic_mode": 32,
+            "stem": {"content": "_  _  _", "remark": remark},
+            "topic_code": "x",
+            "options": [{"content": c} for c in options],
+        }
+
+    def test_recovers_answer_when_options_differ(self) -> None:
+        topic = self._phrase_topic(["formula", "a", "bullet", "mathematical"])
+        self.assertEqual(self.solver._loose_phrase_answer(topic, 32), "a mathematical formula")  # noqa: SLF001
+
+    def test_rejects_when_answer_words_missing_from_pool(self) -> None:
+        topic = self._phrase_topic(["bullet", "dense", "ripe"])
+        self.assertIsNone(self.solver._loose_phrase_answer(topic, 32))  # noqa: SLF001
+
+    def test_rejects_unknown_stem(self) -> None:
+        topic = self._phrase_topic(["a", "b", "c"], remark="从没见过的词组")
+        self.assertIsNone(self.solver._loose_phrase_answer(topic, 32))  # noqa: SLF001
+
+    def test_never_reuses_choice_index(self) -> None:
+        """选择题（mode 11）的答案是个下标，选项一变就没意义 —— 必须拒绝。"""
+        self.bank.put("11::norm::abandon::舍弃|遗弃::a|b", 1, flush=False)
+        topic = {
+            "topic_mode": 11,
+            "stem": {"content": "abandon", "remark": "舍弃|遗弃"},
+            "topic_code": "x",
+            "options": [{"content": "完全不同的选项A"}, {"content": "完全不同的选项B"}],
+        }
+        self.assertIsNone(self.solver._loose_phrase_answer(topic, 11))  # noqa: SLF001
+
+
 class SelectWordsTest(unittest.TestCase):
     """选词逻辑：只挑未达标的词；全达标时返回空 —— 空的时候绝不能再开答题会话。
 

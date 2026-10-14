@@ -61,6 +61,11 @@ def topic_key(topic: dict[str, Any]) -> str:
     return f"{topic_mode(topic)}::{kind}::{stem}::{remark}::{opts.lower()}"
 
 
+def topic_key_loose(topic: dict[str, Any]) -> str:
+    """不含选项的题目指纹 —— 选项每次可能变，宽松键用来找回同一个题干的旧答案。"""
+    return topic_key(topic).rsplit("::", 1)[0]
+
+
 def absorb_word_defs(topic: dict[str, Any], word_defs: dict[str, list[str]]) -> list[str]:
     """mode=0 的题目本身就是「单词 + 释义」，顺手记下，后面选择题直接查表。"""
     if topic_mode(topic) != 0:

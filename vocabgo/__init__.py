@@ -19,7 +19,7 @@ from .settings import load_settings, resolve_llm, save_settings
 from .solver import Solver, Stats
 from .vision import ImageReader, detect_image, hydrate_topic
 
-__version__ = "2.1.0"
+__version__ = "2.1.1"
 __all__ = [
     "Bank",
     "ImageReader",

@@ -76,6 +76,24 @@ class Bank:
             return entry.get("ans")
         return None
 
+    def find_loose(self, prefix: str, limit: int = 200) -> list[tuple[str, Any]]:
+        """按「不含选项的题目指纹」找旧记录（选项每次可能不同，精确键会 miss）。
+
+        返回 [(完整键, 答案), ...]。调用方**必须自己校验答案能不能用**：
+        内容型答案（词本身）可以复用，下标型答案（选项编号）绝对不要复用 ——
+        选项变了下标就是错的，答错反而扣分。
+        """
+        prefix = prefix + "::"
+        hits: list[tuple[str, Any]] = []
+        for key, entry in self._cache.items():
+            if not key.startswith(prefix):
+                continue
+            if isinstance(entry, dict) and entry.get("ans") is not None:
+                hits.append((key, entry["ans"]))
+                if len(hits) >= limit:
+                    break
+        return hits
+
     def put(self, key: str, answer: Any, stem: str = "", flush: bool = True) -> None:
         self._cache[key] = {
             "ans": answer,

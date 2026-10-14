@@ -22,6 +22,7 @@ answer_corrects，于是可以「用正确答案再判一次 → answer_result=1
 from __future__ import annotations
 
 import random
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -39,6 +40,7 @@ from .matcher import (
     match_choice,
     match_collocation,
     topic_key,
+    topic_key_loose,
     topic_mode,
     topic_options,
 )
@@ -231,6 +233,8 @@ class Solver:
 
         # 1) 题库
         cached = self.bank.get(key)
+        if cached is None:
+            cached = self._loose_phrase_answer(topic, mode)
         if cached is not None:
             code, ok, _ = self._answer(topic, code, cached)
             if ok:
@@ -286,6 +290,28 @@ class Solver:
             self.stats.wrong_saved += 1
         self.log(f"  ❓ {stem} → {display_answer(topic, fallback)} {source_label('guess')}")
         return self._submit(code, mode)
+
+    def _loose_phrase_answer(self, topic: dict[str, Any], mode: int) -> str | None:
+        """选项变了导致精确键 miss 时，找回同一个题干的旧答案。
+
+        只认「内容型」答案（组词题给的是词本身），并且要求每个词都能在当前选项池里找到 ——
+        选择题的答案是选项下标，选项一变下标就没意义了，所以绝不复用，宁可重新推。
+        复用内容型答案能省下一次「故意答错」，直接提高正确率记录。
+        """
+        if mode != 32:
+            return None
+        pool = {str(opt.get("content") or "").strip().lower() for opt in topic_options(topic)}
+        pool.discard("")
+        if not pool:
+            return None
+        for _full_key, answer in self.bank.find_loose(topic_key_loose(topic)):
+            if not isinstance(answer, str) or not answer.strip():
+                continue
+            # 组词题的答案两种存法都见过：`a mathematical formula`（空格）和 `in,many,instances`（逗号）
+            tokens = [tok for tok in re.split(r"[\s,，]+", answer.strip()) if tok]
+            if tokens and all(tok.lower() in pool for tok in tokens):
+                return answer
+        return None
 
     def _solve_multi(self, topic: dict[str, Any]) -> dict[str, Any]:
         """搭配题：多选，服务端用 over_status 标记整题判完。"""
