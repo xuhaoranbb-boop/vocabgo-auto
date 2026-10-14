@@ -389,9 +389,12 @@ def _run_study(
     ).get("word_list") or []
     word_map = select_words(words, max_score=max_score)
     pending = sum(len(v) for v in word_map.values())
+    if not pending:
+        # 全达标：再调 StartAnswer 只会换来「20001 需要选词！」，直接收工
+        print(f"✅ 这条任务 {len(words)} 个词都已达标（≥{max_score} 分），不用再练了")
+        return 0
     print(f"📝 共 {len(words)} 词，待练 {pending} 词")
-    if pending:
-        client.study_submit_chose_word(task_id, course_id, list_id, word_map, task_type=task_type, grade=grade)
+    client.study_submit_chose_word(task_id, course_id, list_id, word_map, task_type=task_type, grade=grade)
 
     solver = build_solver(config, client, "study", args)
     solver.run(task_id=task_id, course_id=course_id, list_id=list_id, task_type=task_type, grade=grade)

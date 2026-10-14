@@ -5,8 +5,13 @@
 
 1. **cache**  本地题库命中（历史答过，零风险）
 2. **match**  规则匹配：mode=0 学到的词义 / 搭配题 remark 里直接给的 relation
-3. **probe**  试答案：提交错误答案逼服务端回吐 answer_corrects，再用正确答案重判
-4. **llm**    大模型兜底（需自行配置 OpenAI 兼容接口）
+3. **llm**    大模型兜底（需自行配置 OpenAI 兼容接口）
+4. **probe**  试答案：提交错误答案逼服务端回吐 answer_corrects，再用正确答案重判
+              —— 注意这招会故意答错，而词达人的词分按作答正确率累计，所以放在模型之后
+
+策略链顺序（见 `_solve_one`）：题库 → 规则匹配 → 大模型 → 试答案 → 盲选。
+把「试答案」放在后面是**故意**的：实测错两次对一次的词只能拿 3.7 分，
+错一次对一次拿 5.0 分，全程不错能到 7.5+，所以能一次答对就别故意答错。
 5. **guess**  最后盲选（只保证流程不卡死）
 
 其中 3 是关键：VerifyAnswer 连续两次收到错误答案后，响应体会带上本题的
@@ -168,6 +173,13 @@ class Solver:
                 else:
                     save = self._solve_one(topic)
             except Exception as exc:
+                text = str(exc)
+                if "20001" in text or "需要选词" in text:
+                    # 这不是故障：本轮选中的词都答完了，服务端要求重新选词。
+                    # 属于正常的会话结束，别报成「异常」吓人。
+                    self.log(f"✅ 本轮题目已答完（{self.stats.done}/{self.stats.total}）　{self.stats.report()}")
+                    self.bank.flush()
+                    return self.stats
                 self.stats.errors += 1
                 self.log(f"  ⚠️ 本题异常，跳过：{type(exc).__name__}: {exc}")
                 self.bank.flush()
@@ -236,7 +248,22 @@ class Solver:
                 self.log(f"  ✅ {stem} → {display_answer(topic, matched)} {source_label('match')}")
                 return self._submit(code, mode)
 
-        # 3) 试答案
+        # 3) 大模型
+        # 注意顺序：**先问模型，再考虑试答案**。
+        # 因为词达人的词分是按作答正确率累计的（实测：错两次对一次 ≈ 3.7 分，
+        # 错一次对一次 ≈ 5.0 分，全程不错 ≈ 7.5 分），而试答案会故意答错，
+        # 每用一次就把这个词的记录拉低一截。所以只在模型也没辙时才动用它。
+        if self.llm and self.llm.enabled:
+            guess = self.llm.ask_phrase(topic, self.word_defs) if mode == 32 else self.llm.ask_choice(topic, self.word_defs)
+            if guess is not None:
+                code, ok, _ = self._answer(topic, code, guess)
+                if ok:
+                    self.stats.llm += 1
+                    self.bank.put(key, guess, display_stem(topic))
+                    self.log(f"  🤖 {stem} → {display_answer(topic, guess)} {source_label('llm')}")
+                    return self._submit(code, mode)
+
+        # 4) 试答案（兜底：故意答错换服务端的正确答案，会拉低该词正确率，谨慎使用）
         if self.probe_enabled:
             code, probed = self._probe(topic, code)
             if probed is not None:
@@ -250,17 +277,6 @@ class Solver:
                 self.stats.wrong_saved += 1
                 self.log(f"  ⚠️ {stem} → 试答案纠正失败，按现状提交")
                 return self._submit(str(data.get("topic_code") or code), mode)
-
-        # 4) LLM
-        if self.llm and self.llm.enabled:
-            guess = self.llm.ask_phrase(topic, self.word_defs) if mode == 32 else self.llm.ask_choice(topic, self.word_defs)
-            if guess is not None:
-                code, ok, _ = self._answer(topic, code, guess)
-                if ok:
-                    self.stats.llm += 1
-                    self.bank.put(key, guess, display_stem(topic))
-                    self.log(f"  🤖 {stem} → {display_answer(topic, guess)} {source_label('llm')}")
-                    return self._submit(code, mode)
 
         # 5) 盲选
         fallback: Any = self._default_answer(topic)
