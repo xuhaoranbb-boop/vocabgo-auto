@@ -85,7 +85,11 @@ class EnsureStudyTaskTest(unittest.TestCase):
         ), patch.object(client, "study_start_task", side_effect=VocabgoError("nope")):
             with self.assertRaises(VocabgoError) as ctx:
                 client.ensure_study_task("CET4_v2", "CET4_v2_01")
-        self.assertIn("先在词达人里打开这条课程", str(ctx.exception))
+        message = str(ctx.exception)
+        # 实测平台对「同一课程的自学任务条数」有限制（建第 3 条回「没有权限」），
+        # 所以报错要把这个原因说清楚，而不是让人反复重试
+        self.assertIn("数量已达上限", message)
+        self.assertIn("list_id=CET4_v2_01", message)
 
 
 class ClientHeaderTest(unittest.TestCase):

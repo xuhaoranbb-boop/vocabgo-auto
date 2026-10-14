@@ -131,6 +131,23 @@ def match_word_to_def(word: str, topic: dict[str, Any], word_defs: dict[str, lis
     return None
 
 
+def target_word(topic: dict[str, Any]) -> str:
+    """题干里被考的那个词。
+
+    - mode 11 之类：题干形如 "He {abandoned} the plan." → 取花括号里的 `abandoned`
+    - mode 31 之类：题干本身就是词 → 直接用它
+    - 组词题（一堆下划线）没有单词可查 → 返回空串
+    """
+    if is_collocation(topic) or topic_mode(topic) == 32:
+        return ""
+    stem = topic_stem(topic)
+    brace = WORD_BRACE.search(stem)
+    word = norm(brace.group(1) if brace else stem)
+    if not word or word.startswith("_") or " " in word:
+        return ""
+    return word
+
+
 def match_choice(topic: dict[str, Any], word_defs: dict[str, list[str]]) -> Any | None:
     """选择题（31 / 11 / 其他）的规则匹配入口，命中返回 answer_tag。"""
     if is_collocation(topic):

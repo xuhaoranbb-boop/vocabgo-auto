@@ -32,6 +32,7 @@ from .bank import Bank
 from .client import VocabgoClient, join_phrase
 from .llm import LlmHelper
 from .vision import ImageReader, hydrate_topic, topic_image_fields
+from .glossary import Glossary, match_option, meaning_hint
 from .matcher import (
     absorb_word_defs,
     display_answer,
@@ -39,6 +40,7 @@ from .matcher import (
     is_collocation,
     match_choice,
     match_collocation,
+    target_word,
     topic_key,
     topic_key_loose,
     topic_mode,
@@ -51,6 +53,7 @@ WRONG_SENTINEL = ""  # 试答案用的「明显错误」作答
 SOURCE_LABELS = {
     "cache": "题库",
     "match": "规则",
+    "glossary": "词库",
     "probe": "试答案",
     "llm": "大模型",
     "guess": "猜测",
@@ -72,6 +75,7 @@ class Stats:
     done: int = 0
     cache: int = 0
     match: int = 0
+    glossary: int = 0  # 在线词典 / 本地词库命中
     probe: int = 0
     llm: int = 0
     guess: int = 0
@@ -90,6 +94,7 @@ class Stats:
             f"进度 {self.done}/{self.total}",
             f"题库 {self.cache}",
             f"规则 {self.match}",
+            f"词库 {self.glossary}",
             f"试答案 {self.probe}",
             f"LLM {self.llm}",
             f"猜测 {self.guess}",
@@ -111,6 +116,7 @@ class Solver:
         kind: str = "class",
         llm: LlmHelper | None = None,
         reader: ImageReader | None = None,
+        glossary: Glossary | None = None,
         probe: bool = True,
         probe_attempts: int = 2,
         pace: tuple[float, float] = (1.0, 2.6),
@@ -123,6 +129,7 @@ class Solver:
         self.kind = kind  # "class" = 班级任务, "study" = 自学任务
         self.llm = llm
         self.reader = reader
+        self.glossary = glossary  # 在线词典 / 本地词库，用来把「凭记忆」变成「查得到」
         self.probe_enabled = probe
         self.probe_attempts = probe_attempts
         self.pace = pace
@@ -252,13 +259,30 @@ class Solver:
                 self.log(f"  ✅ {stem} → {display_answer(topic, matched)} {source_label('match')}")
                 return self._submit(code, mode)
 
+        # 2.5) 查词典（在线词典 / 本地词库）
+        # 让「凭记忆」变成「查得到」：拿题干里的词去查中文释义，再和选项比对。
+        # 比对是保守的 —— 不够确定就返回 None，交给后面的模型/试答案，绝不硬猜。
+        by_dict = self._solve_by_glossary(topic, mode)
+        if by_dict is not None:
+            return by_dict
+
         # 3) 大模型
         # 注意顺序：**先问模型，再考虑试答案**。
         # 因为词达人的词分是按作答正确率累计的（实测：错两次对一次 ≈ 3.7 分，
         # 错一次对一次 ≈ 5.0 分，全程不错 ≈ 7.5 分），而试答案会故意答错，
         # 每用一次就把这个词的记录拉低一截。所以只在模型也没辙时才动用它。
         if self.llm and self.llm.enabled:
-            guess = self.llm.ask_phrase(topic, self.word_defs) if mode == 32 else self.llm.ask_choice(topic, self.word_defs)
+            # 先查词典，把权威释义塞进 prompt —— 让模型「看着词典挑」而不是「凭记忆猜」
+            hint = ""
+            if self.glossary and self.glossary.enabled:
+                word = target_word(topic)
+                if word:
+                    hint = meaning_hint(self.glossary.lookup(word))
+            guess = (
+                self.llm.ask_phrase(topic, self.word_defs, hint)
+                if mode == 32
+                else self.llm.ask_choice(topic, self.word_defs, hint)
+            )
             if guess is not None:
                 code, ok, _ = self._answer(topic, code, guess)
                 if ok:
@@ -289,6 +313,35 @@ class Solver:
         if not ok:
             self.stats.wrong_saved += 1
         self.log(f"  ❓ {stem} → {display_answer(topic, fallback)} {source_label('guess')}")
+        return self._submit(code, mode)
+
+    def _solve_by_glossary(self, topic: dict[str, Any], mode: int) -> dict[str, Any] | None:
+        """查词典定答案：题干里的词 → 在线词典/本地词库的中文释义 → 匹配选项。
+
+        这是「不靠记忆靠查证」的那一环。匹配器阈值定得保守，
+        不达标就返回 None，让后面的模型或试答案接手 —— 宁可说不知道，也不硬猜。
+        """
+        if not (self.glossary and self.glossary.enabled):
+            return None
+        if mode == 32:  # 组词题的选项是英文词，没有中文可对
+            return None
+        word = target_word(topic)
+        if not word:
+            return None
+        meanings = self.glossary.lookup(word)
+        if not meanings:
+            return None
+        index = match_option(meanings, topic_options(topic))
+        if index is None:
+            return None
+        code = str(topic.get("topic_code") or "")
+        code, ok, _ = self._answer(topic, code, index)
+        if not ok:
+            return None
+        self.stats.glossary += 1
+        self.stats.hit("glossary")
+        self.bank.put(topic_key(topic), index, display_stem(topic))
+        self.log(f"  📖 {display_stem(topic)} → {display_answer(topic, index)} {source_label('glossary')}")
         return self._submit(code, mode)
 
     def _loose_phrase_answer(self, topic: dict[str, Any], mode: int) -> str | None:

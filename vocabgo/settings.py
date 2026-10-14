@@ -56,6 +56,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
                                  # 故意答错会永久留在成绩里，得不偿失。
         "prepare_class": True,   # 班级任务开跑前，先刷对应自学任务把题库喂饱（同一套词表）
         "prepare_rounds": 3,     # 备题刷几轮
+        "glossary": True,        # 查词典（在线词典 + 本地词库）：不靠记忆，靠查证
+        "glossary_path": "",     # 词库缓存文件，留空 = 跟题库放一起（glossary.json）
     },
 }
 

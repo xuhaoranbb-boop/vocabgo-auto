@@ -305,7 +305,11 @@ class VocabgoClient:
                 created = item.get("task_id")
                 if created and int(created) > 0:
                     return int(created)
-        raise VocabgoError(f"没能创建/找到自学任务（list_id={list_id}）：请先在词达人里打开这条课程，再回来重试")
+        raise VocabgoError(
+            f"没能创建/找到自学任务（list_id={list_id}）。\n"
+            "   常见原因：该课程的**自学任务数量已达上限**（平台按课程限，实测同一课程建 2 条后\n"
+            "   再建就回「没有权限」）。解决办法：先把已创建的刷到满分，或换一门课程再试。"
+        )
 
     def study_task_info(self, task_id: Any, course_id: str, list_id: Any, task_type: int = 3, grade: int = 2) -> dict[str, Any]:
         return self._get(

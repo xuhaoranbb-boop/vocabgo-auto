@@ -14,6 +14,7 @@ from typing import Any
 
 from . import net
 from .bank import Bank
+from .glossary import Glossary
 from .client import VocabgoClient, VocabgoError
 from .llm import PROVIDER_PRESETS, load_llm_from_config, provider_label, thinking_label
 from .paths import bank_path as default_bank_path
@@ -85,6 +86,13 @@ def build_solver(config: dict[str, Any], client: VocabgoClient, kind: str, args:
         kind=kind,
         llm=llm,
         reader=reader,
+        # 词库：在线词典 + 本地缓存
+        glossary=Glossary(
+            str(runtime.get("glossary_path") or "") or str(Path(bank_file).parent / "glossary.json"),
+            logger=print,
+        )
+        if bool(runtime.get("glossary", True))
+        else None,
         # 班级任务只有一次机会：默认关掉「试答案」，故意答错会永久计入成绩
         probe=bool(runtime.get("probe", True))
         and not getattr(args, "no_probe", False)

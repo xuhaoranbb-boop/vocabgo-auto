@@ -206,12 +206,12 @@ class LlmHelper:
         return text or None
 
     # ── 业务能力 ──
-    def ask_choice(self, topic: dict[str, Any], word_defs: dict[str, list[str]]) -> Any | None:
-        """选择题：返回选项下标（int）。"""
+    def ask_choice(self, topic: dict[str, Any], word_defs: dict[str, list[str]], hint: str = "") -> Any | None:
+        """选择题：返回选项下标（int）。hint 是词典查到的权威释义。"""
         options = topic_options(topic)
         if not options:
             return None
-        text = self._chat(self.build_prompt(topic, word_defs), max_tokens=16)
+        text = self._chat(self.build_prompt(topic, word_defs, hint), max_tokens=16)
         if not text:
             return None
         match = re.search(r"\d+", text)
@@ -220,9 +220,9 @@ class LlmHelper:
         index = int(match.group())
         return index if 0 <= index < len(options) else None
 
-    def ask_phrase(self, topic: dict[str, Any], word_defs: dict[str, list[str]]) -> str | None:
+    def ask_phrase(self, topic: dict[str, Any], word_defs: dict[str, list[str]], hint: str = "") -> str | None:
         """组词题：返回 "in,many,instances"。"""
-        text = self._chat(self.build_prompt(topic, word_defs), max_tokens=48)
+        text = self._chat(self.build_prompt(topic, word_defs, hint), max_tokens=48)
         if not text:
             return None
         tokens = [tok for tok in re.split(r"[\s,，]+", text.strip()) if tok]
@@ -289,7 +289,7 @@ class LlmHelper:
 
     # ── 提示词 ──
     @staticmethod
-    def build_prompt(topic: dict[str, Any], word_defs: dict[str, list[str]]) -> str:
+    def build_prompt(topic: dict[str, Any], word_defs: dict[str, list[str]], hint: str = "") -> str:
         mode = topic_mode(topic)
         stem = topic_stem(topic)
         remark = topic_remark(topic)
@@ -297,9 +297,12 @@ class LlmHelper:
         opts_text = "\n".join(f"{i}. {opt.get('content', '')}" for i, opt in enumerate(options))
 
         glossary = ""
+        # 在线词典/本地词库查到的释义优先采信 —— 比模型凭记忆靠谱
+        if hint.strip():
+            glossary += f"权威词典释义（与被考单词匹配的优先采信）: {hint.strip()}\n\n"
         if word_defs:
             lines = [f"  {w}: {'; '.join(ds)}" for w, ds in list(word_defs.items())[:40]]
-            glossary = "已知单词释义:\n" + "\n".join(lines) + "\n\n"
+            glossary += "已知单词释义:\n" + "\n".join(lines) + "\n\n"
 
         if mode == 32:
             return (

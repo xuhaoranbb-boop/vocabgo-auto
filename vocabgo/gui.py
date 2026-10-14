@@ -22,6 +22,7 @@ import requests
 from . import net
 from .bank import Bank
 from .client import VocabgoClient, VocabgoError
+from .glossary import Glossary
 from .llm import (
     PROVIDER_PRESETS,
     guess_models,
@@ -1016,10 +1017,17 @@ class VocabgoApp:
 
         reader = load_reader_from_config(config, logger=self.log) if self.var_ocr.get() else None
 
+        # 词库：在线词典 + 本地缓存，把「凭记忆」变成「查得到」
+        runtime_cfg = config.get("runtime") or {}
+        glossary = None
+        if bool(runtime_cfg.get("glossary", True)):
+            cache_path = str(runtime_cfg.get("glossary_path") or "") or str(bank_file.parent / "glossary.json")
+            glossary = Glossary(cache_path, logger=self.log)
+
         # 班级任务只有一次机会（服务端是限时测试，过了就回「20006 任务已截止」），
         # 「试答案」会故意答错并永久计入成绩，所以默认对班级任务关掉。
         probe_enabled = bool(self.var_probe.get())
-        if kind == "class" and not bool((config.get("runtime") or {}).get("probe_on_class")):
+        if kind == "class" and not bool(runtime_cfg.get("probe_on_class")):
             if probe_enabled:
                 self.log("🛡️ 班级任务只有一次机会：已自动关闭「试答案」（故意答错会永久留在成绩里）")
             probe_enabled = False
@@ -1030,6 +1038,7 @@ class VocabgoApp:
             kind=kind,
             llm=load_llm_from_config(config, logger=self.log),
             reader=reader,
+            glossary=glossary,
             probe=probe_enabled,
             pace=(float(self.var_pace_lo.get() or 0), float(self.var_pace_hi.get() or 0)),
             cancel=self.cancel,
