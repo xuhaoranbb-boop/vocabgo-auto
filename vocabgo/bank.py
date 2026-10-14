@@ -76,6 +76,17 @@ class Bank:
             return entry.get("ans")
         return None
 
+    def cover_count(self, words: list[str]) -> int:
+        """这批词里，有多少个在题库中见过（粗覆盖率）。
+
+        用来在「只有一次机会」的班级任务开跑前提醒用户：题库太薄就别硬上，
+        先去自学任务把同一批词喂进题库，再一次拿高分。
+        """
+        if not words:
+            return 0
+        haystack = " ".join(f"{entry.get('stem', '')} {key}" for key, entry in self._cache.items()).lower()
+        return sum(1 for word in words if word and str(word).lower() in haystack)
+
     def find_loose(self, prefix: str, limit: int = 200) -> list[tuple[str, Any]]:
         """按「不含选项的题目指纹」找旧记录（选项每次可能不同，精确键会 miss）。
 

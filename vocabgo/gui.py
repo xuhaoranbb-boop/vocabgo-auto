@@ -1015,17 +1015,30 @@ class VocabgoApp:
         save_settings(config)
 
         reader = load_reader_from_config(config, logger=self.log) if self.var_ocr.get() else None
+
+        # 班级任务只有一次机会（服务端是限时测试，过了就回「20006 任务已截止」），
+        # 「试答案」会故意答错并永久计入成绩，所以默认对班级任务关掉。
+        probe_enabled = bool(self.var_probe.get())
+        if kind == "class" and not bool((config.get("runtime") or {}).get("probe_on_class")):
+            if probe_enabled:
+                self.log("🛡️ 班级任务只有一次机会：已自动关闭「试答案」（故意答错会永久留在成绩里）")
+            probe_enabled = False
+
         solver = Solver(
             client,
             bank,
             kind=kind,
             llm=load_llm_from_config(config, logger=self.log),
             reader=reader,
-            probe=bool(self.var_probe.get()),
+            probe=probe_enabled,
             pace=(float(self.var_pace_lo.get() or 0), float(self.var_pace_hi.get() or 0)),
             cancel=self.cancel,
             logger=self.log,
         )
+
+        # 班级任务只有一次机会 —— 先用对应的自学任务把同一份词表喂进题库，再上场
+        if kind == "class":
+            self._prepare_for_class(client, solver, chosen, config, max_score, bank)
 
         for round_index in range(rounds):
             if self.cancel.is_set():
@@ -1038,6 +1051,70 @@ class VocabgoApp:
             self.ui(self.progress.configure, value=100)
         self.ui(self._refresh_status)
         self.log("✅ 结束")
+
+    def _prepare_for_class(
+        self,
+        client: VocabgoClient,
+        solver: Solver,
+        chosen: dict[str, Any],
+        config: dict[str, Any],
+        max_score: float,
+        bank: Bank,
+    ) -> None:
+        """班级任务开跑前，先刷对应的自学任务把题库喂饱。
+
+        为什么：班级任务是**限时测试，只有一次机会**（服务端过期就回「20006 任务已截止」），
+        答错会永久留在成绩里。而词达人的班级任务与自学任务共用同一套词表
+        （course_id + list_id 一一对应），所以先在自学任务里把词刷进题库，
+        等于提前拿到考场答案 —— 上场就一次答对。
+
+        由 runtime.prepare_class 控制（默认开），轮数见 runtime.prepare_rounds。
+        """
+        runtime = config.get("runtime") or {}
+        if not bool(runtime.get("prepare_class", True)):
+            return
+
+        course_id = str(chosen.get("course_id") or "")
+        list_id = str(chosen.get("list_id") or "")
+        task_id = chosen.get("task_id")
+        names: list[str] = []
+        if task_id and int(task_id) > 0:
+            try:
+                words = (client.chose_word_list(int(task_id)).get("data") or {}).get("word_list") or []
+                names = [str(w.get("word") or "") for w in words if w.get("word")]
+            except Exception:
+                names = []
+        if names:
+            pct = bank.cover_count(names) * 100 // max(1, len(names))
+            if pct >= 80:
+                self.log(f"🎒 题库覆盖已经 {pct}%，不用备题，直接上考场")
+                return
+        if not course_id or not list_id:
+            return
+
+        self.log(f"🎒 备题：班级任务只有一次机会，先去自学任务把 {list_id} 刷熟（同一套词表）")
+        try:
+            data = (client.study_task_list(course_id=course_id).get("data") or {})
+        except Exception as exc:
+            self.log(f"   （取自学任务列表失败，跳过备题：{exc}）")
+            return
+
+        target = next(
+            (item for item in (data.get("task_list") or []) if str(item.get("list_id")) == list_id),
+            None,
+        )
+        if not target:
+            self.log(f"   课程 {course_id} 下没找到对应的自学任务 {list_id}，跳过备题")
+            return
+
+        rounds = max(1, int(runtime.get("prepare_rounds") or 3))
+        self.log(f"   找到对应自学任务：{target.get('task_name')}，先刷 {rounds} 轮")
+        for i in range(rounds):
+            if self.cancel.is_set():
+                return
+            self.log(f"\n----- 备题 {i + 1}/{rounds} 轮 -----")
+            self._run_once(client, solver, target, "study", config, max_score, bank)
+        self.log("🎒 备题完成，现在上场做班级任务")
 
     def _run_once(
         self,
@@ -1096,6 +1173,18 @@ class VocabgoApp:
             return None
         self.log(f"→ 班级任务：{chosen.get('task_name')}（task_id={task_id}）")
         words = (client.chose_word_list(task_id).get("data") or {}).get("word_list") or []
+
+        # 班级任务只有一次机会 —— 开跑前先把题库覆盖率摆出来，不够就别硬上
+        names = [str(w.get("word") or "") for w in words if w.get("word")]
+        covered = bank.cover_count(names)
+        if names:
+            pct = covered * 100 // len(names)
+            self.log(f"📚 题库覆盖：{covered}/{len(names)} 词（{pct}%）")
+            if pct < 60:
+                self.log("⚠️ 这是**只有一次机会**的班级任务，而题库对这些词的覆盖偏低。")
+                self.log("   建议先在「自学任务」里刷同一词表，把题库喂饱，再回来做班级任务 —— 一次就能拿高分。")
+                self.log("   （这次仍会继续，但遇到没见过的题只能靠大模型或猜，答错就永久计入了）")
+
         word_map = select_words(words, max_score=max_score)
         if not word_map:
             self.log(f"✅ 这条任务 {len(words)} 个词都已达标（≥{max_score} 分），不用再练了")

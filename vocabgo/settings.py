@@ -52,6 +52,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "ocr": True,        # 上次的读图开关
         "last_task_id": "", # 上次刷的任务，下次自动帮你选中
         "token_saved_at": "", # 令牌是什么时候拿到的（词达人令牌约 6 小时过期，用来提前提醒）
+        "probe_on_class": False, # 班级任务是否允许「试答案」。默认关：班级任务只有一次机会，
+                                 # 故意答错会永久留在成绩里，得不偿失。
+        "prepare_class": True,   # 班级任务开跑前，先刷对应自学任务把题库喂饱（同一套词表）
+        "prepare_rounds": 3,     # 备题刷几轮
     },
 }
 

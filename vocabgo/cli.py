@@ -85,7 +85,10 @@ def build_solver(config: dict[str, Any], client: VocabgoClient, kind: str, args:
         kind=kind,
         llm=llm,
         reader=reader,
-        probe=bool(runtime.get("probe", True)) and not getattr(args, "no_probe", False),
+        # 班级任务只有一次机会：默认关掉「试答案」，故意答错会永久计入成绩
+        probe=bool(runtime.get("probe", True))
+        and not getattr(args, "no_probe", False)
+        and (kind != "class" or bool(runtime.get("probe_on_class"))),
         pace=(float(pace[0]), float(pace[1])),
         logger=print,
     )
@@ -334,6 +337,19 @@ def _run_class(client: VocabgoClient, config: dict[str, Any], args: argparse.Nam
     print(f"📋 {info.get('task_name') or name}")
 
     words = (client.chose_word_list(task_id).get("data") or {}).get("word_list") or []
+
+    # 班级任务只有一次机会（服务端限时测试，过了回「20006 任务已截止」），
+    # 开跑前先把题库覆盖率摆出来
+    bank_file = default_bank_path((config.get("runtime") or {}).get("bank_path") or None)
+    names = [str(w.get("word") or "") for w in words if w.get("word")]
+    covered = Bank(bank_file).cover_count(names)
+    if names:
+        pct = covered * 100 // len(names)
+        print(f"📚 题库覆盖：{covered}/{len(names)} 词（{pct}%）")
+        if pct < 60:
+            print("⚠️ 这是只有一次机会的班级任务，题库覆盖偏低。")
+            print("   建议先在自学任务里刷同一词表把题库喂饱，再回来做班级任务。")
+
     word_map = select_words(words, max_score=max_score)
     pending = sum(len(v) for v in word_map.values())
     print(f"📝 共 {len(words)} 词，待练 {pending} 词")

@@ -455,6 +455,28 @@ class UnstartedTaskTest(unittest.TestCase):
             self.assertFalse(VocabgoApp._is_unstarted(good), f"不该判定为未开始：{good}")  # noqa: SLF001
 
 
+class ClassTaskSafetyTest(unittest.TestCase):
+    """班级任务只有一次机会 —— 默认不许「故意答错」，并且要能报题库覆盖率。"""
+
+    def test_probe_off_for_class_by_default(self) -> None:
+        from vocabgo.settings import DEFAULT_SETTINGS  # noqa: PLC0415
+
+        self.assertFalse(DEFAULT_SETTINGS["runtime"]["probe_on_class"], "班级任务默认必须关掉试答案")
+
+    def test_cover_count(self) -> None:
+        import tempfile  # noqa: PLC0415
+
+        from vocabgo.bank import Bank  # noqa: PLC0415
+
+        with tempfile.TemporaryDirectory() as folder:
+            bank = Bank(Path(folder) / "bank.json")
+            bank.put("32::norm::_ _ _::数学公式::a|formula", "a mathematical formula", stem="_  _  _ (数学公式)", flush=False)
+            bank.put("11::norm::he {twisted} the wire::他扭曲铁丝::v. 扭|v. 拉", 0, stem="He twisted the wire", flush=False)
+            names = ["twist", "formula", "完全没见过的词"]
+            self.assertEqual(bank.cover_count(names), 2, "twist/formula 都在题库里，第三个没有")
+            self.assertEqual(bank.cover_count([]), 0)
+
+
 class GuiImportTest(unittest.TestCase):
     def test_gui_module_imports(self) -> None:
         """GUI 至少要在无显示器/打包环境下也能 import（Tk 只在 main 里创建）。"""
