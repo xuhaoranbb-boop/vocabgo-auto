@@ -632,9 +632,9 @@ class VocabgoApp:
         except tk.TclError:
             self._log_job = None  # 窗口已经销毁，收工
 
-    def ui(self, fn: Callable[..., Any], *args: Any) -> None:
-        """从后台线程安全地更新界面。"""
-        self.root.after(0, lambda: fn(*args))
+    def ui(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
+        """从后台线程安全地更新界面（关键字参数照原样透传，例如 configure(value=100)）。"""
+        self.root.after(0, lambda: fn(*args, **kwargs))
 
     def _short(self, path: Any, parts: int = 2) -> str:
         """把长路径缩成最后两段显示，避免把窗口撑宽（完整路径在设置页里看）。"""
@@ -1073,9 +1073,14 @@ class VocabgoApp:
                 client.study_chose_word_list(task_id, course_id, list_id, task_type=task_type, grade=grade).get("data") or {}
             ).get("word_list") or []
             word_map = select_words(words, max_score=max_score)
-            if word_map:
-                self.log(f"📝 共 {len(words)} 词，待练 {sum(len(v) for v in word_map.values())} 词")
-                client.study_submit_chose_word(task_id, course_id, list_id, word_map, task_type=task_type, grade=grade)
+            if not word_map:
+                # 所有词都满分了：此时再调 StartAnswer 会被服务端回「20001 需要选词！」，
+                # 所以干脆不开始这一轮，直接算完成。
+                self.log(f"✅ 这条任务 {len(words)} 个词都已达标（≥{max_score} 分），不用再练了")
+                self.ui(self.progress.configure, value=100)
+                return None
+            self.log(f"📝 共 {len(words)} 词，待练 {sum(len(v) for v in word_map.values())} 词")
+            client.study_submit_chose_word(task_id, course_id, list_id, word_map, task_type=task_type, grade=grade)
             solver.kind = "study"
             return solver.run(task_id=task_id, course_id=course_id, list_id=list_id, task_type=task_type, grade=grade)
 
@@ -1092,9 +1097,12 @@ class VocabgoApp:
         self.log(f"→ 班级任务：{chosen.get('task_name')}（task_id={task_id}）")
         words = (client.chose_word_list(task_id).get("data") or {}).get("word_list") or []
         word_map = select_words(words, max_score=max_score)
-        if word_map:
-            self.log(f"📝 共 {len(words)} 词，待练 {sum(len(v) for v in word_map.values())} 词")
-            client.submit_chose_word(task_id, word_map)
+        if not word_map:
+            self.log(f"✅ 这条任务 {len(words)} 个词都已达标（≥{max_score} 分），不用再练了")
+            self.ui(self.progress.configure, value=100)
+            return None
+        self.log(f"📝 共 {len(words)} 词，待练 {sum(len(v) for v in word_map.values())} 词")
+        client.submit_chose_word(task_id, word_map)
         solver.kind = "class"
         stats = solver.run(task_id=task_id, release_id=release_id)
         try:

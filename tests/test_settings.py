@@ -394,6 +394,16 @@ class GuiPlaceholderTest(unittest.TestCase):
         self.assertNotIn("留空即自动推算", json.dumps(config, ensure_ascii=False), "提示文字泄漏进配置了")
 
 
+    def test_ui_forwards_keyword_arguments(self) -> None:
+        """踩过的坑：ui() 只收 *args，界面里 self.ui(self.progress.configure, value=100) 直接崩。
+
+        报错长这样：TypeError: VocabgoApp.ui() got an unexpected keyword argument 'value'
+        """
+        seen: dict = {}
+        self.app.ui(lambda **kwargs: seen.update(kwargs), value=100, other="x")  # noqa: SLF001
+        self.root.update()
+        self.assertEqual(seen, {"value": 100, "other": "x"})
+
     def test_login_dialog_opens_and_closes(self) -> None:
         """点「登录获取令牌」应弹出登录对话框（账号密码 / 用户ID+验证码）。"""
         self.app.on_login()

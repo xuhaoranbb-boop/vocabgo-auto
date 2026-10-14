@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mock_server import serve  # noqa: E402
 from vocabgo.bank import Bank  # noqa: E402
 from vocabgo.client import VocabgoClient  # noqa: E402
-from vocabgo.solver import Solver  # noqa: E402
+from vocabgo.solver import Solver, select_words  # noqa: E402
 
 
 class StubReader:
@@ -34,6 +34,40 @@ class StubReader:
     def read(self, _ref) -> str:
         self.calls += 1
         return self.text
+
+
+class SelectWordsTest(unittest.TestCase):
+    """选词逻辑：只挑未达标的词；全达标时返回空 —— 空的时候绝不能再开答题会话。
+
+    踩过的坑：全满分时仍然调 StartAnswer，服务端回「20001 需要选词！」，
+    于是日志里刷一串「本题异常，跳过」。
+    """
+
+    def test_only_picks_below_threshold(self) -> None:
+        words = [
+            {"word": "accent", "score": 0, "course_id": "CET4_v2", "list_id": "CET4_v2_01"},
+            {"word": "mild", "score": 9.5, "course_id": "CET4_v2", "list_id": "CET4_v2_01"},
+            {"word": "ripe", "score": 10, "course_id": "CET4_v2", "list_id": "CET4_v2_01"},
+            {"word": "steep", "score": "10.0", "course_id": "CET4_v2", "list_id": "CET4_v2_01"},
+        ]
+        picked = select_words(words, max_score=10)
+        self.assertEqual(picked, {"CET4_v2:CET4_v2_01": ["accent", "mild"]})
+
+    def test_all_full_score_returns_empty(self) -> None:
+        words = [
+            {"word": "ripe", "score": 10, "course_id": "CET4_v2", "list_id": "CET4_v2_01"},
+            {"word": "mild", "score": 10.0, "course_id": "CET4_v2", "list_id": "CET4_v2_01"},
+        ]
+        self.assertEqual(select_words(words, max_score=10), {}, "全满分时不该再开答题会话")
+
+    def test_string_scores_and_missing_fields(self) -> None:
+        words = [
+            {"word": "a", "score": "", "course_id": "c", "list_id": "l"},
+            {"word": "b", "course_id": "c", "list_id": "l"},
+            {"word": "c", "score": "abc", "course_id": "c", "list_id": "l"},
+        ]
+        picked = select_words(words, max_score=10)
+        self.assertEqual(picked["c:l"], ["a", "b", "c"], "解析不了的分数按 0 处理，别漏词")
 
 
 class SolverE2ETest(unittest.TestCase):
