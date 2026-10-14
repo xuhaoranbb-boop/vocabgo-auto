@@ -174,6 +174,55 @@ python build_release.py --onefile    # 单文件版，体积更小
 
 ---
 
+## 开发与自动化
+
+### 提交即推送
+
+仓库带了 `post-commit` 钩子：**每次 commit 后自动推送到 GitHub**（推送失败不影响提交，只提示手动补推）。
+
+首次克隆后启用一次：
+
+```bash
+git config core.hooksPath .githooks
+```
+
+想临时跳过：`git commit --no-verify`。
+
+### CI 与自动发版
+
+`.github/workflows/` 下准备了两个工作流：
+
+| 工作流 | 触发 | 干什么 |
+| --- | --- | --- |
+| `ci.yml` | 每次 push / PR | 在 Windows + Linux、Python 3.12/3.13 上跑全部测试 |
+| `release.yml` | push `v*` 标签 | 自动打包 exe 并创建 GitHub Release |
+
+推送 workflow 文件需要令牌带 `workflow` 权限，遇到下面这个错就补一次：
+
+```bash
+gh auth refresh -s workflow
+```
+
+```
+! [remote rejected] main -> main
+  (refusing to allow an OAuth App to create or update workflow
+   `.github/workflows/ci.yml` without `workflow` scope)
+```
+
+### 平台变更踩坑表
+
+下面几条都是**平台侧改了东西**造成的，出现新问题先照这里排查：
+
+| 现象 | 真因 | 现在的做法 |
+| --- | --- | --- |
+| 扫码后「微信认证失败」 | 旧扫码授权链路被平台改掉 | 改走 `?authorize=0` 拿 code，再自己解密 |
+| 登录响应「加密失败！」 | 服务端要用客户端公钥加密响应 | 本地生成 ECDH P-256 密钥对，HKDF + AES-GCM 解密 |
+| 创建自学任务「请重新登录」 | `StudyTask/StartTask` 被服务端特殊保护 | 改用 `StudyTask/Info` 传 `task_id=-1` 让服务端建 |
+| 刷到一半突然 `11003 需安全验证` | 令牌有效期实测约 **6 小时** | 记下获取时间，5.5 小时起主动提醒重新登录 |
+| 班级任务「加载任务信息失败」 | 未开始的任务 `task_id=-1` | 列表里标 `⚠️未开始`，自动跳过并说明怎么办 |
+
+---
+
 ## 常见问题
 
 **令牌失效了？** 重新点「登录获取令牌」。刷题期间不要在手机或其它设备登录词达人，否则令牌会被刷新。
