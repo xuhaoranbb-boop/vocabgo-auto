@@ -48,6 +48,7 @@ from .qrlogin import (
     open_file,
     render_qr_png,
     token_alive,
+    token_expiry_hint,
 )
 from .settings import apply_recommended, load_settings, recommended_lines, resolve_llm, save_settings
 from .solver import Solver, select_words
@@ -346,14 +347,22 @@ class VocabgoApp:
         network = self.config.setdefault("network", {})
         net.configure(str(network.get("proxy") or ""), bool(network.get("use_system_proxy")))
 
+    def _announce_token_age(self) -> None:
+        """启动时看一眼令牌多老了 —— 词达人令牌约 6 小时过期，提前说一声比刷到一半断掉强。"""
+        hint = token_expiry_hint(self.config)
+        if hint:
+            self.log(hint)
+
     def _announce_network(self) -> None:
         """启动时把代理策略讲清楚 —— 电脑上残留代理是「全部请求失败」的头号原因。"""
         self._apply_network()
         if net.proxies():
             self.log(f"🌐 网络：使用指定代理 {net.proxies()}")
+            self._announce_token_age()
             return
         if net.trust_env():
             self.log(f"🌐 网络：跟随系统代理（检测到 {net.detect_proxy() or '无'}）")
+            self._announce_token_age()
             return
         detected = net.detect_proxy()
         if detected:
@@ -361,6 +370,7 @@ class VocabgoApp:
             self.log("   需要走代理的话，到「设置」页填代理地址或勾选「跟随系统代理」")
         else:
             self.log("🌐 网络：直连")
+        self._announce_token_age()
 
     def _on_provider_selected(self, _event: Any = None) -> None:
         self._on_provider_change()
@@ -768,16 +778,21 @@ class VocabgoApp:
 
         ttk.Label(
             box3,
-            text="① 手机微信扫左边的二维码，并在手机上点「同意」\n"
+            text="① 手机微信扫码，或把「复制登录链接」发到电脑微信里点开（PC 上点开不用扫码）\n"
                  "② 页面打开后，点右上角「⋯」→「复制链接」\n"
-                 "③ 把复制到的链接粘到下面这条框里，点「确认登录」",
+                 "③ 回到这里点「从剪贴板读取并登录」——或者把链接粘到下面再点「确认登录」",
             justify="left",
         ).grid(row=0, column=1, sticky="w", padx=8, pady=(10, 4))
         self.var_wechat_url = tk.StringVar()
         entry_wechat = ttk.Entry(box3, textvariable=self.var_wechat_url, width=46)
         entry_wechat.grid(row=1, column=1, sticky="we", padx=8, pady=4)
         entry_wechat.bind("<Return>", lambda _e: self._do_wechat_login())
-        ttk.Button(box3, text="确认登录", command=self._do_wechat_login).grid(row=2, column=1, sticky="e", padx=8, pady=(0, 10))
+
+        buttons3 = ttk.Frame(box3)
+        buttons3.grid(row=2, column=1, sticky="e", padx=8, pady=(0, 10))
+        ttk.Button(buttons3, text="复制登录链接", command=lambda: self._copy_text(wechat_url)).pack(side="left", padx=4)
+        ttk.Button(buttons3, text="从剪贴板读取并登录", command=self._wechat_login_from_clipboard).pack(side="left", padx=4)
+        ttk.Button(buttons3, text="确认登录", command=self._do_wechat_login).pack(side="left", padx=4)
         box3.columnconfigure(1, weight=1)
 
         ttk.Label(
@@ -837,6 +852,33 @@ class VocabgoApp:
             self._handle_login(login_with_password(user, password))
 
         self._run_in_thread(task, busy=False)
+
+    def _copy_text(self, text: str) -> None:
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+            self.log("📋 登录链接已复制 —— 发给电脑微信（或手机微信）点开，再用页面上的「⋯ → 复制链接」把带 code 的链接拿回来")
+        except Exception as exc:
+            self.log(f"⚠️ 复制失败：{exc}")
+
+    def _wechat_login_from_clipboard(self) -> None:
+        """直接读剪贴板：用户复制完那条链接，点一下这个按钮就行，不用手动粘。"""
+        try:
+            raw = self.root.clipboard_get()
+        except Exception as exc:
+            messagebox.showwarning(APP_TITLE, f"读不到剪贴板内容：{exc}\n\n请先在微信页面点「⋯ → 复制链接」。")
+            return
+        code = extract_wechat_code(raw)
+        if not code:
+            messagebox.showwarning(
+                APP_TITLE,
+                "剪贴板里没找到 code。\n\n请确认复制的是「打开后的那个页面」的链接（包含 code=xxxx 那段），"
+                "而不是二维码那一步的链接。",
+            )
+            return
+        self.var_wechat_url.set(raw.strip())
+        self.log(f"📋 已从剪贴板读到链接，code={code[:8]}…")
+        self._do_wechat_login()
 
     def _do_wechat_login(self) -> None:
         raw = self.var_wechat_url.get().strip()
@@ -900,10 +942,15 @@ class VocabgoApp:
                 records = (client.page_task(page=1, size=50, search_type="0").get("data") or {}).get("records") or []
             self.tasks = list(records)
             self.ui(self.task_list.delete, 0, "end")
+            is_study = kind == "study"
             for index, item in enumerate(self.tasks):
+                task_id = item.get("task_id")
+                # 班级任务里 task_id<=0 说明这条还没在词达人里开始过（服务端没给编号），
+                # 拿去请求会得到「加载任务信息失败」；自学任务的 -1 是正常的（会先创建），所以只标班级任务。
+                unstarted = (not is_study) and self._is_unstarted(item)
                 line = (
                     f"[{index}] {item.get('task_name')}　进度{item.get('progress')}%　得分{item.get('score')}"
-                    f"　编号={item.get('task_id')}"
+                    f"　编号={task_id}" + ("　⚠️未开始（先在词达人里点开它）" if unstarted else "")
                 )
                 self.ui(self.task_list.insert, "end", line)
                 self.log(f"📚 {line}")
@@ -911,25 +958,40 @@ class VocabgoApp:
                 self.log("⚠️ 没查到任务（token 失效？或没有进行中的任务）")
                 return
 
-            # 上次刷过哪个任务，这次自动帮你选中
+            # 上次刷过哪个任务，这次自动帮你选中；班级任务里绝不自动选中「未开始」的那条
             saved_id = str(((self.config.get("runtime") or {}).get("last_task_id")) or "")
             pick = 0
+            if not is_study:
+                pick = next((i for i, item in enumerate(self.tasks) if not self._is_unstarted(item)), 0)
             for index, item in enumerate(self.tasks):
-                if saved_id and str(item.get("task_id")) == saved_id:
+                if saved_id and str(item.get("task_id")) == saved_id and (is_study or not self._is_unstarted(item)):
                     pick = index
                     self.log(f"🎯 已自动选回上次的任务：{item.get('task_name')}")
                     break
+            if not is_study and self._is_unstarted(self.tasks[pick]):
+                self.log("⚠️ 列表里的任务都还没开始过 —— 请先在词达人（微信/App）里点开其中一条，再回来「刷新任务」")
             self.ui(self.task_list.selection_clear, 0, "end")
             self.ui(self.task_list.selection_set, pick)
             self.ui(self.task_list.see, pick)
 
         self._run_in_thread(task, busy=False)
 
+    @staticmethod
+    def _is_unstarted(item: dict) -> bool:
+        """判断任务是否「还没开始过」（词达人给未开始的任务发 task_id<=0）。"""
+        try:
+            return int(item.get("task_id") or 0) <= 0
+        except (TypeError, ValueError):
+            return True
+
     # ── 刷题 ──
     def on_start(self) -> None:
         if not self.tasks:
             messagebox.showinfo(APP_TITLE, "先点「刷新任务」并选中要刷的那一条")
             return
+        hint = token_expiry_hint(self.config)
+        if hint:
+            self.log(hint)
         selection = self.task_list.curselection()
         index = int(selection[0]) if selection else 0
         self._run_in_thread(lambda: self._do_run(index))
@@ -994,6 +1056,19 @@ class VocabgoApp:
             task_type = int(chosen.get("task_type") or 3)
             grade = int(chosen.get("grade") or (config.get("study") or {}).get("grade") or 2)
             self.log(f"→ 自学任务：{chosen.get('task_name')}（list_id={list_id}）")
+
+            # 自学任务的 task_id=-1 是正常的：表示这条还没创建过。
+            # 正路：Info(task_id=-1) 会让服务端把任务建出来并返回真实 id（见 client.ensure_study_task）。
+            if not task_id or str(task_id) in ("-1", "0"):
+                self.log("🆕 这条自学任务还没创建过，正在创建…")
+                try:
+                    task_id = client.ensure_study_task(course_id, list_id, task_type=task_type, grade=grade)
+                except Exception as exc:
+                    self.log(f"❌ {exc}")
+                    self.ui(self.progress.configure, value=0)
+                    return None
+                self.log(f"🆕 已就绪，task_id={task_id}")
+
             words = (
                 client.study_chose_word_list(task_id, course_id, list_id, task_type=task_type, grade=grade).get("data") or {}
             ).get("word_list") or []
@@ -1006,6 +1081,14 @@ class VocabgoApp:
 
         task_id = int(chosen["task_id"])
         release_id = int(chosen["release_id"])
+        if task_id <= 0:
+            # 词达人给「还没开始过」的任务发 task_id=-1，直接请求会得到
+            # 「对不起，加载任务信息失败，请返回首页重新加载」——这里提前拦住并说人话。
+            self.log(f"❌ 「{chosen.get('task_name')}」还没开始过（编号={task_id}），服务端不认这个编号。")
+            self.log("   解决：先在词达人（微信/App）里点开这条任务，让它变成「进行中」，再回来「刷新任务」。")
+            self.log("   或者：换一条有正常编号的任务（列表里带 ⚠️未开始 的都跳过）。")
+            self.ui(self.progress.configure, value=0)
+            return None
         self.log(f"→ 班级任务：{chosen.get('task_name')}（task_id={task_id}）")
         words = (client.chose_word_list(task_id).get("data") or {}).get("word_list") or []
         word_map = select_words(words, max_score=max_score)

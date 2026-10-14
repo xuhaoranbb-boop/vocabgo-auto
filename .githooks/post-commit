@@ -1,0 +1,43 @@
+#!/bin/sh
+# 每次 commit 之后自动推送到 GitHub。
+#
+# 启用方式（在仓库里执行一次）：
+#     git config core.hooksPath .githooks
+#
+# 设计原则：推送失败绝不影响提交本身 —— 提交是本地事实，推送是尽力而为。
+# 想临时跳过：git commit --no-verify 或 git -c core.hooksPath= commit
+
+set -e
+
+# 合并/变基过程中不推（历史还没定下来）
+if [ -f "$(git rev-parse --git-dir)/MERGE_HEAD" ] || [ -d "$(git rev-parse --git-dir)/rebase-merge" ]; then
+    exit 0
+fi
+
+remote=$(git remote get-url origin 2>/dev/null) || exit 0
+[ -z "$remote" ] && exit 0
+
+branch=$(git symbolic-ref --short HEAD 2>/dev/null) || exit 0
+[ -z "$branch" ] && exit 0
+
+upstream=$(git rev-parse --abbrev-ref --symbolic-full-name "@{upstream}" 2>/dev/null) || upstream=""
+
+echo ""
+echo "  [post-commit] 自动推送到 GitHub：$branch → origin"
+
+if [ -n "$upstream" ]; then
+    if git push origin "$branch" >/dev/null 2>&1; then
+        echo "  [post-commit] ✅ 已推送 $(git rev-parse --short HEAD) → $remote"
+    else
+        echo "  [post-commit] ⚠️ 推送失败（网络/权限？）—— 提交本身没问题，稍后可手动："
+        echo "                     git push origin $branch"
+    fi
+else
+    if git push -u origin "$branch" >/dev/null 2>&1; then
+        echo "  [post-commit] ✅ 已推送并设置上游 $(git rev-parse --short HEAD)"
+    else
+        echo "  [post-commit] ⚠️ 推送失败，稍后手动：git push -u origin $branch"
+    fi
+fi
+
+exit 0

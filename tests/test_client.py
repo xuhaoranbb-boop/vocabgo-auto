@@ -13,6 +13,7 @@ import hashlib
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -40,6 +41,51 @@ class DeriveAuthTest(unittest.TestCase):
         """UA 一换 abc 就得跟着换 —— 这正是平台拿它做「配套校验」的意义。"""
         self.assertNotEqual(derive_auth_headers("UA-A")[0], derive_auth_headers("UA-B")[0])
         self.assertEqual(derive_auth_headers(DEFAULT_UA)[0], hashlib.md5(DEFAULT_UA.encode()).hexdigest())
+
+
+class EnsureStudyTaskTest(unittest.TestCase):
+    """自学任务的 task_id 获取：正路是 Info(task_id=-1)，不是 StartTask。
+
+    坑的来历：StartTask 现在被服务端特殊保护，直接调只回「请重新登录」；
+    而 Info 传 task_id=-1 时，服务端会把任务建出来并把真实 id 返回。
+    """
+
+    def _client(self) -> VocabgoClient:
+        return VocabgoClient("tok")
+
+    def test_uses_existing_id_from_list(self) -> None:
+        client = self._client()
+        with patch.object(client, "study_task_list", return_value={"data": {"task_list": [
+            {"list_id": "CET4_v2_01", "task_id": 167358106},
+        ]}}), patch.object(client, "study_task_info") as info:
+            self.assertEqual(client.ensure_study_task("CET4_v2", "CET4_v2_01"), 167358106)
+        info.assert_not_called()
+
+    def test_creates_via_info_when_list_says_minus_one(self) -> None:
+        client = self._client()
+        with patch.object(client, "study_task_list", return_value={"data": {"task_list": [
+            {"list_id": "CET4_v2_01", "task_id": -1},
+        ]}}), patch.object(client, "study_task_info", return_value={"code": 1, "data": {"task_id": 167358123}}) as info:
+            self.assertEqual(client.ensure_study_task("CET4_v2", "CET4_v2_01"), 167358123)
+        self.assertEqual(info.call_args[0][0], -1, "创建时必须传 task_id=-1")
+
+    def test_falls_back_to_start_task(self) -> None:
+        client = self._client()
+        with patch.object(client, "study_task_list", return_value={"data": {"task_list": [
+            {"list_id": "CET4_v2_01", "task_id": -1},
+        ]}}), patch.object(client, "study_task_info", side_effect=VocabgoError("nope")), patch.object(
+            client, "study_start_task", return_value={"code": 1, "data": {"task_id": 999}}
+        ):
+            self.assertEqual(client.ensure_study_task("CET4_v2", "CET4_v2_01"), 999)
+
+    def test_raises_with_actionable_message(self) -> None:
+        client = self._client()
+        with patch.object(client, "study_task_list", return_value={"data": {"task_list": []}}), patch.object(
+            client, "study_task_info", side_effect=VocabgoError("nope")
+        ), patch.object(client, "study_start_task", side_effect=VocabgoError("nope")):
+            with self.assertRaises(VocabgoError) as ctx:
+                client.ensure_study_task("CET4_v2", "CET4_v2_01")
+        self.assertIn("先在词达人里打开这条课程", str(ctx.exception))
 
 
 class ClientHeaderTest(unittest.TestCase):

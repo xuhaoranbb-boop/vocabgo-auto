@@ -18,6 +18,8 @@
 from __future__ import annotations
 
 import base64
+import copy
+import datetime
 import json
 import os
 import random
@@ -414,7 +416,11 @@ def open_file(path: Path) -> None:
 
 
 def write_token(config_file: Path, token: str) -> Path:
-    """把 token 写进配置文件（保留其余配置）。"""
+    """把 token 写进配置文件（保留其余配置），并记下获取时间。
+
+    记时间是因为：词达人的令牌**有效期约 6 小时**（实测 10:16 登录 → 16:22 失效），
+    到点后所有请求都会回 11003「需安全验证」/「请重新登录」。有了时间戳就能提前提醒。
+    """
     from .settings import DEFAULT_SETTINGS
 
     config: dict[str, Any] = {}
@@ -424,11 +430,47 @@ def write_token(config_file: Path, token: str) -> Path:
         except Exception:
             config = {}
     for section, defaults in DEFAULT_SETTINGS.items():
-        config.setdefault(section, dict(defaults) if not isinstance(defaults, dict) else defaults)
+        # 注意：必须 deepcopy！直接传 defaults 会把「全局默认配置」这个对象塞进 config，
+        # 后面一改就污染了 DEFAULT_SETTINGS，之后所有 load_settings 都会带上旧值。
+        config.setdefault(section, copy.deepcopy(defaults))
     config.setdefault("auth", {})["usertoken"] = token
+    config.setdefault("runtime", {})["token_saved_at"] = datetime.datetime.now().isoformat(timespec="seconds")
     config_file.parent.mkdir(parents=True, exist_ok=True)
     config_file.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
     return config_file
+
+
+TOKEN_LIFETIME_HOURS = 6.0  # 实测：词达人令牌约 6 小时过期
+
+
+def token_age_hours(config: dict[str, Any] | None) -> float | None:
+    """令牌拿到多久了（小时）。没有记录时间就返回 None。"""
+    stamp = str(((config or {}).get("runtime") or {}).get("token_saved_at") or "")
+    if not stamp:
+        return None
+    try:
+        saved = datetime.datetime.fromisoformat(stamp)
+    except ValueError:
+        return None
+    return (datetime.datetime.now() - saved).total_seconds() / 3600.0
+
+
+def token_expiry_hint(config: dict[str, Any] | None) -> str:
+    """按令牌年龄给一句人话提醒；还年轻就返回空串。"""
+    age = token_age_hours(config)
+    if age is None:
+        return ""
+    if age >= TOKEN_LIFETIME_HOURS:
+        return (
+            f"⏰ 这个令牌已经拿到 {age:.1f} 小时了（有效期约 {TOKEN_LIFETIME_HOURS:.0f} 小时），"
+            "基本肯定已过期 —— 请点「登录获取令牌」重新登录。"
+        )
+    if age >= TOKEN_LIFETIME_HOURS - 0.5:
+        return (
+            f"⏰ 提醒：这个令牌已经用了 {age:.1f} 小时，有效期约 {TOKEN_LIFETIME_HOURS:.0f} 小时，"
+            "建议刷完这轮就重新登录，免得刷到一半断掉。"
+        )
+    return ""
 
 
 def start_login(

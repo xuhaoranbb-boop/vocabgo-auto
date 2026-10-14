@@ -48,7 +48,19 @@ RENDER_PARAMS = {
 # 所以这两个值可以直接推算，不抓包也能跑；抓包拿到的真值优先级更高（万一平台升级了校验）。
 DERIVED_AUTH_V = "cfcd208495d565ef66e7dff9f98764da"          # md5("0")
 DERIVED_AUTH_V_SUBMIT = "c4ca4238a0b923820dcc509a6f75849b"   # md5("1")
-AUTH_HINT_KEYWORDS = ("登录", "授权", "token", "签名", "sign", "abc", "鉴权", "非法", "禁止", "校验")
+AUTH_HINT_KEYWORDS = (
+    "登录",
+    "授权",
+    "token",
+    "签名",
+    "sign",
+    "abc",
+    "鉴权",
+    "非法",
+    "禁止",
+    "校验",
+    "安全验证",  # 11003「需安全验证！」——见 _auth_hint 里的专门说明
+)
 
 
 def derive_auth_headers(user_agent: str) -> tuple[str, str]:
@@ -96,6 +108,7 @@ class VocabgoClient:
         self.user_agent = user_agent or DEFAULT_UA
         self.abc_derived = not (abc or "").strip()
         self.auth_v_derived = not (auth_v or "").strip()
+        self._last_code: Any = None  # 最近一次业务错误码，给 _auth_hint 判断用
         derived_abc, derived_auth_v = derive_auth_headers(self.user_agent)
         self.session = net.make_session()  # 默认直连（忽略系统/环境代理），代理策略见 net.py
         self.session.headers.update(
@@ -123,6 +136,15 @@ class VocabgoClient:
         return "，".join(parts) if parts else "abc / authorization-v 均来自抓包"
 
     def _auth_hint(self) -> str:
+        # 11003「需安全验证！」是服务端认为这次请求的凭据不认：要么令牌过期，要么被别处登录顶掉
+        if self._last_code == 11003:
+            return (
+                "\n   ⏰ 词达人的令牌有效期实测约 6 小时，最常见的死因就是过期。按顺序排查："
+                "\n   1) 重新「登录获取令牌」——过期了的话这一条就够了；"
+                "\n   2) 刚登录就这样？那是被别处登录顶掉了（单点登录）——刷题期间别在手机/微信/小程序里打开词达人；"
+                "\n   3) 仍然不行：先在手机微信里打开词达人，把可能弹出的安全验证（滑块/图形码）过掉，再重新登录；"
+                "\n   4) 短时间大量请求也会触发风控，歇几分钟再试。"
+            )
         if not (self.abc_derived or self.auth_v_derived):
             return ""
         fields = "、".join(
@@ -165,6 +187,7 @@ class VocabgoClient:
             print(f"<- {response.status_code} {data}")
         data = unwrap(data)
         if data.get("code") not in (1, None):
+            self._last_code = data.get("code")
             message = f"接口报错 code={data.get('code')} msg={data.get('msg') or data.get('message')}"
             text = str(data.get("msg") or data.get("message") or "").lower()
             if response.status_code >= 400 or any(word in text for word in AUTH_HINT_KEYWORDS):
@@ -226,11 +249,63 @@ class VocabgoClient:
         return self._get("/Student/StudyTask/List", {"course_id": course_id}, base=self.study_base)
 
     def study_start_task(self, course_id: str, list_id: Any, task_type: int = 3, grade: int = 2) -> dict[str, Any]:
+        """【此接口已被服务端特殊保护，直接调会回「请重新登录」】保留仅为兼容。
+
+        创建自学任务请用 ``ensure_study_task()``（它走 Info 那条正路）。
+        """
         return self._post(
             "/Student/StudyTask/StartTask",
             {"course_id": course_id, "list_id": list_id, "task_type": task_type, "grade": grade},
             base=self.study_base,
         )
+
+    def ensure_study_task(self, course_id: str, list_id: Any, task_type: int = 3, grade: int = 2) -> int:
+        """拿到自学任务的 task_id；还没创建过就顺手创建出来。
+
+        正路是 ``GET /Student/StudyTask/Info`` 传 ``task_id=-1``：
+        服务端会把任务建好，并把真实 task_id 连同词表一起返回。
+
+        （历史坑：以前用 ``StudyTask/StartTask`` 创建，但那个接口现在被服务端特殊保护，
+        直接调只回「请重新登录」——所以改走 Info。）
+        """
+        # ① 先看列表里有没有现成的
+        try:
+            records = (self.study_task_list(course_id=course_id).get("data") or {}).get("task_list") or []
+            for item in records:
+                if str(item.get("list_id")) == str(list_id):
+                    existing = item.get("task_id")
+                    if existing and int(existing) > 0:
+                        return int(existing)
+                    break
+        except Exception:
+            pass
+
+        # ② 没有就让 Info 建：task_id 传 -1
+        try:
+            data = self.study_task_info(-1, course_id, list_id, task_type=task_type, grade=grade).get("data") or {}
+            created = data.get("task_id")
+            if created and int(created) > 0:
+                return int(created)
+        except Exception:
+            pass
+
+        # ③ 兜底：StartTask（部分账号/旧版本还能用）
+        try:
+            data = self.study_start_task(course_id, list_id, task_type=task_type, grade=grade).get("data") or {}
+            created = data.get("task_id") or data.get("id")
+            if created and int(created) > 0:
+                return int(created)
+        except Exception:
+            pass
+
+        # ④ 最后再查一次列表（可能刚被 Info 建好）
+        records = (self.study_task_list(course_id=course_id).get("data") or {}).get("task_list") or []
+        for item in records:
+            if str(item.get("list_id")) == str(list_id):
+                created = item.get("task_id")
+                if created and int(created) > 0:
+                    return int(created)
+        raise VocabgoError(f"没能创建/找到自学任务（list_id={list_id}）：请先在词达人里打开这条课程，再回来重试")
 
     def study_task_info(self, task_id: Any, course_id: str, list_id: Any, task_type: int = 3, grade: int = 2) -> dict[str, Any]:
         return self._get(

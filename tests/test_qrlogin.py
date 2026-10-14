@@ -31,6 +31,67 @@ class FakeResponse:
         return self._payload
 
 
+class TokenLifetimeTest(unittest.TestCase):
+    """词达人令牌实测约 6 小时过期（10:16 登录 → 16:22 失效）。
+
+    所以要能按「拿到多久了」给出提醒，而不是等用户刷到一半报 11003。
+    """
+
+    def test_no_timestamp_no_hint(self) -> None:
+        self.assertIsNone(qrlogin.token_age_hours({}))
+        self.assertEqual(qrlogin.token_expiry_hint({}), "")
+        self.assertEqual(qrlogin.token_expiry_hint(None), "")
+
+    def test_fresh_token_no_hint(self) -> None:
+        import datetime  # noqa: PLC0415
+
+        stamp = (datetime.datetime.now() - datetime.timedelta(minutes=10)).isoformat(timespec="seconds")
+        config = {"runtime": {"token_saved_at": stamp}}
+        self.assertLess(qrlogin.token_age_hours(config), 1.0)
+        self.assertEqual(qrlogin.token_expiry_hint(config), "")
+
+    def test_old_token_warns(self) -> None:
+        import datetime  # noqa: PLC0415
+
+        stamp = (datetime.datetime.now() - datetime.timedelta(hours=5, minutes=45)).isoformat(timespec="seconds")
+        hint = qrlogin.token_expiry_hint({"runtime": {"token_saved_at": stamp}})
+        self.assertIn("建议", hint)
+
+    def test_expired_token_says_relogin(self) -> None:
+        import datetime  # noqa: PLC0415
+
+        stamp = (datetime.datetime.now() - datetime.timedelta(hours=6, minutes=30)).isoformat(timespec="seconds")
+        hint = qrlogin.token_expiry_hint({"runtime": {"token_saved_at": stamp}})
+        self.assertIn("重新登录", hint, "过期了要明确让用户重新登录")
+
+    def test_write_token_records_timestamp(self) -> None:
+        import tempfile  # noqa: PLC0415
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "config.json"
+            qrlogin.write_token(path, "abc123")
+            saved = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(saved["auth"]["usertoken"], "abc123")
+        self.assertTrue(saved["runtime"]["token_saved_at"], "要记下令牌获取时间")
+        self.assertIsNotNone(qrlogin.token_age_hours(saved))
+
+    def test_write_token_does_not_pollute_global_defaults(self) -> None:
+        """踩过的坑：setdefault 直接塞了 DEFAULT_SETTINGS 里的对象，写令牌把全局默认值改了。
+
+        症状是之后所有「从零读配置」的地方都会莫名带着上一个令牌。
+        """
+        import tempfile  # noqa: PLC0415
+
+        from vocabgo.settings import DEFAULT_SETTINGS, load_settings  # noqa: PLC0415
+
+        before = DEFAULT_SETTINGS["auth"].get("usertoken", "")
+        with tempfile.TemporaryDirectory() as folder:
+            qrlogin.write_token(Path(folder) / "config.json", "should-not-leak")
+            fresh = load_settings(Path(folder) / "empty.json")  # 读一个不存在的配置
+        self.assertEqual(DEFAULT_SETTINGS["auth"].get("usertoken", ""), before, "全局默认值被污染了")
+        self.assertEqual(fresh["auth"]["usertoken"], "", "空配置不该凭空冒出令牌")
+
+
 class WechatQrLoginTest(unittest.TestCase):
     """微信扫码登录：二维码链接生成 → 用户粘贴回来的链接里抠 code → 换令牌。"""
 

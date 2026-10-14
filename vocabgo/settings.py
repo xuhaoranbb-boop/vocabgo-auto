@@ -51,6 +51,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "kind": "class",    # 上次用的任务类型
         "ocr": True,        # 上次的读图开关
         "last_task_id": "", # 上次刷的任务，下次自动帮你选中
+        "token_saved_at": "", # 令牌是什么时候拿到的（词达人令牌约 6 小时过期，用来提前提醒）
     },
 }
 

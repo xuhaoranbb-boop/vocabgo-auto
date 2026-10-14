@@ -426,6 +426,25 @@ class GuiPlaceholderTest(unittest.TestCase):
         self.app._close_login_window()  # noqa: SLF001
 
 
+class UnstartedTaskTest(unittest.TestCase):
+    """词达人给「还没开始过」的任务发 task_id<=0，直接请求会报「加载任务信息失败」。
+
+    所以要能识别出来：列表里标 ⚠️未开始、自动选中时跳过、真去刷时提前拦住。
+    """
+
+    def test_detects_unstarted_tasks(self) -> None:
+        from vocabgo.gui import VocabgoApp  # noqa: PLC0415
+
+        for bad in ({"task_id": -1}, {"task_id": 0}, {"task_id": None}, {}, {"task_id": "0"}, {"task_id": "abc"}):
+            self.assertTrue(VocabgoApp._is_unstarted(bad), f"应判定为未开始：{bad}")  # noqa: SLF001
+
+    def test_normal_task_is_not_unstarted(self) -> None:
+        from vocabgo.gui import VocabgoApp  # noqa: PLC0415
+
+        for good in ({"task_id": 166805546}, {"task_id": "166805546"}):
+            self.assertFalse(VocabgoApp._is_unstarted(good), f"不该判定为未开始：{good}")  # noqa: SLF001
+
+
 class GuiImportTest(unittest.TestCase):
     def test_gui_module_imports(self) -> None:
         """GUI 至少要在无显示器/打包环境下也能 import（Tk 只在 main 里创建）。"""

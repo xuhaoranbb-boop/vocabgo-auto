@@ -327,6 +327,9 @@ def _run_class(client: VocabgoClient, config: dict[str, Any], args: argparse.Nam
 
     print(f"→ 选中任务：{name}（task_id={task_id}）")
 
+    if task_id <= 0:
+        print(f"❌ 「{name}」还没开始过（task_id={task_id}）：先在词达人里点开这条任务，再回来重试")
+        return 1
     info = client.task_info(task_id, release_id).get("data") or {}
     print(f"📋 {info.get('task_name') or name}")
 
@@ -378,17 +381,8 @@ def _run_study(
         print(f"→ 选中自学任务：{chosen.get('task_name')}（list_id={list_id}）")
 
     if not task_id or str(task_id) in ("-1", "0"):
-        started = client.study_start_task(course_id, list_id, task_type=task_type, grade=grade).get("data") or {}
-        task_id = started.get("task_id") or started.get("id")
-        if not task_id:
-            data = client.study_task_list(course_id=course_id).get("data") or {}
-            for item in data.get("task_list") or []:
-                if str(item.get("list_id")) == str(list_id):
-                    task_id = item.get("task_id")
-                    task_type = int(item.get("task_type") or task_type)
-                    grade = int(item.get("grade") or grade)
-                    break
-        print(f"🆕 自学任务已创建：task_id={task_id}")
+        task_id = client.ensure_study_task(course_id, list_id, task_type=task_type, grade=grade)
+        print(f"🆕 自学任务已就绪：task_id={task_id}")
 
     words = (
         client.study_chose_word_list(task_id, course_id, list_id, task_type=task_type, grade=grade).get("data") or {}
