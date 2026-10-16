@@ -156,9 +156,31 @@ def load_settings(path: str | os.PathLike[str] | None = None) -> dict[str, Any]:
     return config
 
 
+def _disk_token_saved_at(config_file: Path) -> str:
+    """读磁盘上记录的「令牌获取时间」；文件不存在或读不出来就返回空串。"""
+    try:
+        data = json.loads(config_file.read_text(encoding="utf-8"))
+    except Exception:
+        return ""
+    return str((data.get("runtime") or {}).get("token_saved_at") or "")
+
+
+def token_saved_at_from_disk(path: str | os.PathLike[str] | None = None) -> str:
+    """磁盘上记录的令牌获取时间（登录成功后用它把内存配置同步回最新值）。"""
+    return _disk_token_saved_at(config_path(path))
+
+
 def save_settings(config: dict[str, Any], path: str | os.PathLike[str] | None = None) -> Path:
     """写回配置（丢掉内部键，保证文件干净）。"""
     config_file = config_path(path or config.get("_path"))
+    runtime = config.get("runtime")
+    if isinstance(runtime, dict):
+        # 「令牌获取时间」只由登录流程推进。GUI 的 self.config 是启动时载入的内存副本，
+        # 界面改动触发的自动保存会把旧值（往往是空串）写回去，6 小时提醒就废了。
+        # 落盘前先和磁盘比一次，谁新用谁。
+        disk_stamp = _disk_token_saved_at(config_file)
+        if disk_stamp > str(runtime.get("token_saved_at") or ""):
+            runtime["token_saved_at"] = disk_stamp
     payload = {
         section: {k: v for k, v in values.items()}
         for section, values in config.items()

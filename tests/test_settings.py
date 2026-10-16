@@ -25,6 +25,7 @@ from vocabgo.settings import (  # noqa: E402
     recommended_lines,
     resolve_llm,
     save_settings,
+    token_saved_at_from_disk,
 )
 
 
@@ -106,6 +107,54 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(missing_auth_fields(config), ["usertoken"])
         config["auth"]["usertoken"] = "x"
         self.assertEqual(missing_auth_fields(config), [])
+
+
+class TokenSavedAtTest(unittest.TestCase):
+    """踩过的坑：登录写好了「令牌获取时间」，界面一改参数触发自动保存，时间戳被内存里的旧值抹掉，
+    6 小时提醒从此不响 —— 用户就只能撞上 11003「需安全验证」。"""
+
+    def setUp(self) -> None:
+        self.folder = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
+        self.tmp = Path(self.folder) / "config.json"
+
+    def test_stale_memory_copy_does_not_erase_disk_stamp(self) -> None:
+        # 模拟：登录流程已经把时间戳写盘
+        on_disk = load_settings(self.tmp)
+        on_disk["runtime"]["token_saved_at"] = "2026-10-16T09:34:16"
+        save_settings(on_disk, self.tmp)
+
+        # 模拟：GUI 手上那份是启动时载入的旧副本（空串），用户改了参数把它整体写回
+        stale = load_settings(self.tmp)
+        self.assertEqual(stale["runtime"]["token_saved_at"], "2026-10-16T09:34:16")
+        stale["runtime"]["token_saved_at"] = ""
+        stale["runtime"]["loop"] = 5
+        save_settings(stale, self.tmp)
+
+        again = load_settings(self.tmp)
+        self.assertEqual(again["runtime"]["token_saved_at"], "2026-10-16T09:34:16", "磁盘上的新时间戳不能被旧副本抹掉")
+        self.assertEqual(again["runtime"]["loop"], 5, "其它字段该照常保存")
+
+    def test_newer_in_memory_stamp_wins(self) -> None:
+        old = load_settings(self.tmp)
+        old["runtime"]["token_saved_at"] = "2026-10-16T09:34:16"
+        save_settings(old, self.tmp)
+
+        fresh = load_settings(self.tmp)
+        fresh["runtime"]["token_saved_at"] = "2026-10-16T13:00:00"
+        save_settings(fresh, self.tmp)
+        self.assertEqual(load_settings(self.tmp)["runtime"]["token_saved_at"], "2026-10-16T13:00:00")
+
+    def test_reader_handles_missing_and_broken_file(self) -> None:
+        self.assertEqual(token_saved_at_from_disk(self.tmp), "")
+        self.tmp.write_text("{ not json", encoding="utf-8")
+        self.assertEqual(token_saved_at_from_disk(self.tmp), "")
+
+    def test_reader_reports_disk_value(self) -> None:
+        config = load_settings(self.tmp)
+        config["runtime"]["token_saved_at"] = "2026-10-16T09:34:16"
+        save_settings(config, self.tmp)
+        self.assertEqual(token_saved_at_from_disk(self.tmp), "2026-10-16T09:34:16")
 
 
 class ResolveLlmTest(unittest.TestCase):

@@ -1,14 +1,20 @@
-﻿# -*- coding: utf-8 -*-
-"""璇嶈揪浜鸿嚜鍔ㄧ瓟棰樺伐鍏凤紙vocabgo / 寰俊璇嶈揪浜猴級銆?
-妯″潡鍒掑垎锛?  crypto    璇锋眰绛惧悕 + 鍝嶅簲 jv 娣锋穯瑙ｇ爜
-  client    鐝骇浠诲姟 / 鑷浠诲姟 涓ゅ HTTP 鎺ュ彛
-  matcher   棰樺共瑙ｆ瀽涓庤鍒欏尮閰?  bank      鏈湴棰樺簱缂撳瓨
-  solver    绛旈涓绘祦绋嬶紙绛栫暐閾?+ 鍙腑鏂級
-  llm       DeepSeek 绛?OpenAI 鍏煎妯″瀷锛氱瓟棰樺厹搴?+ 璇诲浘 + 浣撴
-  vision    璇诲浘锛氬浘鐗囧垽瀹?+ OCR锛圠LM / tesseract / 鐧惧害锛?  qrlogin   鎵爜鎺堟潈鍙?token
-  settings  閰嶇疆涓績锛堥粯璁ゅ€?鈫?config.json 鈫?鐜鍙橀噺锛?  paths     璺緞瑙ｆ瀽锛堟墦鍖呭悗鍐欏埌 exe 鍚岀洰褰曪級
-  gui       tkinter 鍥惧舰鐣岄潰
-  cli       鍛戒护琛屽叆鍙?"""
+# -*- coding: utf-8 -*-
+"""词达人自动答题工具（vocabgo / 微信词达人）。
+
+模块划分：
+  crypto    请求签名 + 响应 jv 混淆解码
+  client    班级任务 / 自学任务 两套 HTTP 接口
+  matcher   题干解析与规则匹配
+  bank      本地题库缓存
+  solver    答题主流程（策略链 + 可中断）
+  llm       DeepSeek 等 OpenAI 兼容模型：答题兜底 + 读图 + 体检
+  vision    读图：图片判定 + OCR（LLM / tesseract / 百度）
+  qrlogin   扫码授权换 token
+  settings  配置中心（默认值 → config.json → 环境变量）
+  paths     路径解析（打包后写到 exe 同目录）
+  gui       tkinter 图形界面
+  cli       命令行入口
+"""
 
 from .bank import Bank
 from .client import VocabgoClient, VocabgoError
@@ -19,7 +25,7 @@ from .settings import load_settings, resolve_llm, save_settings
 from .solver import Solver, Stats
 from .vision import ImageReader, detect_image, hydrate_topic
 
-__version__ = "2.1.3"
+__version__ = "2.1.4"
 __all__ = [
     "Bank",
     "ImageReader",

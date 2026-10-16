@@ -51,7 +51,14 @@ from .qrlogin import (
     token_alive,
     token_expiry_hint,
 )
-from .settings import apply_recommended, load_settings, recommended_lines, resolve_llm, save_settings
+from .settings import (
+    apply_recommended,
+    load_settings,
+    recommended_lines,
+    resolve_llm,
+    save_settings,
+    token_saved_at_from_disk,
+)
 from .solver import Solver, select_words
 from .vision import (
     VISION_BACKENDS,
@@ -917,6 +924,9 @@ class VocabgoApp:
             self.ui(self._on_login_failed, result.message)
             return
         path = login_and_save(result)
+        # 登录刚刚成功，把「令牌获取时间」同步进内存配置：不然界面改动触发的自动保存
+        # 会用启动时的旧值覆盖磁盘上的新时间戳，6 小时提醒就不响了。
+        self.config.setdefault("runtime", {})["token_saved_at"] = token_saved_at_from_disk()
         self.ui(self.var_token.set, result.token)
         self.log(f"✅ 登录成功，令牌已写入 {path}")
         self.log(f"   令牌：{result.token[:10]}…（点「测试连接」可复验）")
